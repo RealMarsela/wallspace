@@ -1,0 +1,21 @@
+{
+ "kind": "entities",
+ "endpoint": "/entities",
+ "params": {
+  "entity_ids": "SYNTH-ENT-0001"
+ },
+ "response": {
+  "results": [
+   {
+    "entity_id": "SYNTH-ENT-0001",
+    "name": "Stand-Up Comedy Specials (synthetic)",
+    "types": [
+     "urn:entity:tv_show"
+    ],
+    "popularity": 0.8
+   }
+  ]
+ },
+ "synthetic": true,
+ "default": true
+}

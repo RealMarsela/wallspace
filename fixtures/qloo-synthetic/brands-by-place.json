@@ -1,0 +1,83 @@
+{
+ "kind": "brands-by-place",
+ "endpoint": "/v2/insights",
+ "params": {
+  "filter.type": "urn:entity:brand",
+  "signal.location": "POINT(-84.3489 33.7648)"
+ },
+ "response": {
+  "success": true,
+  "results": {
+   "entities": [
+    {
+     "entity_id": "SYNTH-BRAND-0001",
+     "name": "Peachtree Pour House (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.9,
+      "popularity": 0.5
+     }
+    },
+    {
+     "entity_id": "SYNTH-BRAND-0002",
+     "name": "Orbit Records (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.86,
+      "popularity": 0.3
+     }
+    },
+    {
+     "entity_id": "SYNTH-BRAND-0003",
+     "name": "Second Spin Vintage (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.8,
+      "popularity": 0.35
+     }
+    },
+    {
+     "entity_id": "SYNTH-BRAND-0004",
+     "name": "Foxglove Brewing (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.74,
+      "popularity": 0.55
+     }
+    },
+    {
+     "entity_id": "SYNTH-BRAND-0005",
+     "name": "Greenroom Tacos (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.67,
+      "popularity": 0.6
+     }
+    },
+    {
+     "entity_id": "SYNTH-BRAND-0006",
+     "name": "Ink & Ember (synthetic)",
+     "types": [
+      "urn:entity:brand"
+     ],
+     "query": {
+      "affinity": 0.6,
+      "popularity": 0.25
+     }
+    }
+   ]
+  }
+ },
+ "synthetic": true,
+ "default": true
+}
