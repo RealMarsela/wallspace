@@ -14,6 +14,9 @@ const links = [
 export function SiteNav() {
   return (
     <header data-testid="site-nav" className="sticky top-0 z-40">
+      <a href="#main" className="sr-only rounded-md bg-signal px-3 py-2 text-small text-[#22211d] focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50">
+        Skip to content
+      </a>
       <div className="bg-night text-on-night">
         <p className="wrap flex h-9 items-center justify-center gap-2 text-center text-micro sm:text-small">
           <span className="truncate">Free to use. Demo city Atlanta. Taste by place, never identity.</span>

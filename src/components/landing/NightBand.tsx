@@ -28,7 +28,7 @@ export function NightBand() {
   const s = useSample();
   const l = s.limits.status === "ready" ? s.limits.data : null;
   const run = s.run.status === "ready" ? runSummary(s.run.data) : null;
-  const wait = <Skeleton className="h-6 w-24 !bg-night-2" />;
+  const wait = <Skeleton className="mt-6 h-[104px] w-full !bg-[#3a3833]" />;
   const cards = [
     {
       title: "Taste only, never identity",
