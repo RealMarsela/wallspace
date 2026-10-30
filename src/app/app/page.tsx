@@ -1,7 +1,7 @@
-import { PlanView } from "@/components/plan/PlanView";
+import { Dashboard } from "@/components/board/Dashboard";
 
-export const metadata = { title: "Sample plan" };
+export const metadata = { title: "Plans" };
 
 export default function AppHome() {
-  return <PlanView />;
+  return <Dashboard />;
 }

@@ -4,8 +4,8 @@ import type { ModelRole } from "@/contract";
 export type Role = z.infer<typeof ModelRole>;
 
 export interface RoleInfo {
-  label: string; // short chip label
-  name: string; // what the thing is
+  label: string; // short chip label, phones only (the full name stays in the accessible name)
+  name: string; // the full name, shown wherever a model is named
   maker: string;
   does: string; // plain-language job in Wallspace
   swatch: string; // CSS color for the chip key
@@ -35,7 +35,7 @@ export const roles: Record<Role, RoleInfo> = {
     swatch: "#8b8e96",
   },
   embedding: {
-    label: "Embedding",
+    label: "Qwen3 Embed",
     name: "Qwen3 Embedding 8B",
     maker: "Qwen (not NVIDIA) · on Nebius Token Factory",
     does: "Turns the planner's free-text audience into the closest Qloo taste tags by meaning.",
@@ -57,15 +57,15 @@ export const roles: Record<Role, RoleInfo> = {
   },
   tavily: {
     label: "Tavily",
-    name: "Tavily search",
-    maker: "Web search API",
+    name: "Tavily",
+    maker: "Tavily search · web search API",
     does: "Finds events near each face during the flight dates. Results are cached by neighbourhood and month.",
     swatch: "#8a5cc4",
   },
   qloo: {
     label: "Qloo",
-    name: "Qloo Taste AI",
-    maker: "Cultural taste data",
+    name: "Qloo",
+    maker: "Qloo Taste AI · cultural taste data",
     does: "Where the audience lives (the heatmap) and what each block over-indexes on. Taste by place, no device tracking.",
     swatch: "#ee7410",
   },

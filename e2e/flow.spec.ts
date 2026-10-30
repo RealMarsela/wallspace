@@ -22,6 +22,7 @@ test("sign up, onboard, run a brief, open its plan, sign out, the sample still o
 
   await page.getByTestId("onboarding-brief-link").click();
   await expect(page).toHaveURL(/\/app\/new$/);
+  await page.getByTestId("preset-sample").click();
   await page.getByTestId("brief-brand").fill("Harbor Light Coffee");
   await page.getByTestId("brief-submit").click();
 
@@ -32,7 +33,8 @@ test("sign up, onboard, run a brief, open its plan, sign out, the sample still o
   await expect(page.getByTestId("plan-view")).toBeVisible();
 
   await page.getByTestId("auth-sign-out").click();
-  await expect(page.getByTestId("auth-indicator")).toHaveAttribute("data-state", "signed-out");
+  await expect(page).not.toHaveURL(/\/app(\/|$)/);
   await page.goto("/sample");
   await expect(page.getByTestId("plan-view")).toBeVisible();
+  await expect(page.getByTestId("auth-indicator")).toHaveAttribute("data-state", "signed-out");
 });

@@ -17,7 +17,7 @@ export interface MeterStatus {
 }
 export type MeterResult = ({ ok: true } | { ok: false; reason: "total_cap" | "day_cap" }) & MeterStatus;
 
-export const DEFAULT_CAPS: MeterCaps = { total: 300, day: 60 };
+export const DEFAULT_CAPS: MeterCaps = { total: 6000, day: 1500 };
 export const dayKey = (now: number): string => new Date(now).toISOString().slice(0, 10);
 
 export class QlooMeterCore {

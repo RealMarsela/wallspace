@@ -3,12 +3,13 @@ import { MemoryStore } from "../db";
 import { QlooClient, newLocalMeter } from "./client";
 import { cityTags, explain, heatmap, search, tags, tagsByPlace } from "./endpoints";
 import { liftAgainstCity, ninesScore, rankTags } from "./lift";
-import { MemoryReplay } from "./replay";
-import type { QlooTag, Recording } from "./types";
+import { fakeQloo, type Route } from "./test-client";
+import type { QlooTag } from "./types";
 
 // Bodies below copy the SHAPES of real responses observed on 30 Oct 2026 (qloo-probe/SHAPES.md), with invented values.
-const replayOf = async (...recs: Recording[]) => new QlooClient({ mode: "replay", replay: await MemoryReplay.from(recs) });
-const rec = (kind: string, endpoint: string, params: Recording["params"], response: unknown): Recording => ({ kind, endpoint, params, response });
+type Params = NonNullable<Route["match"]>;
+const rec = (_kind: string, endpoint: string, params: Params, body: unknown): Route => ({ endpoint, match: params, body });
+const replayOf = async (...routes: Route[]) => fakeQloo(routes).client;
 
 describe("observed response shapes", () => {
   it("/search answers a bare results array with types[] and no success flag", async () => {
@@ -39,7 +40,7 @@ describe("observed response shapes", () => {
 
   it("a city locality query sends signal.location.query and no radius", async () => {
     const f = vi.fn(async () => new Response(JSON.stringify({ success: true, results: { tags: [] } }), { status: 200 }));
-    const c = new QlooClient({ mode: "live", apiKey: "k", localMeter: newLocalMeter(), fetchImpl: f as never });
+    const c = new QlooClient({ apiKey: "k", localMeter: newLocalMeter(), fetchImpl: f as never });
     await cityTags(c, "Atlanta", { take: 50 });
     const url = decodeURIComponent((f.mock.calls[0] as unknown as [string])[0]);
     expect(url).toContain("signal.location.query=Atlanta");
@@ -69,7 +70,7 @@ describe("observed response shapes", () => {
     const f = vi.fn(async () => new Response(JSON.stringify(body), { status: 400 }));
     const store = new MemoryStore();
     const kv = new Map<string, string>();
-    const c = new QlooClient({ mode: "live", apiKey: "k", localMeter: newLocalMeter(), fetchImpl: f as never, store, kv: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async () => undefined } });
+    const c = new QlooClient({ apiKey: "k", localMeter: newLocalMeter(), fetchImpl: f as never, store, kv: { get: async (k) => kv.get(k) ?? null, put: async (k, v) => void kv.set(k, v), delete: async () => undefined } });
     await expect(tagsByPlace(c, 1, 1, { take: 100 })).rejects.toMatchObject({ code: "bad_request", status: 400, message: expect.stringContaining("take must be an integer") });
     expect(kv.size).toBe(0);
     expect((await store.listLedger({ provider: "qloo" }))[0]).toMatchObject({ status: "error" });
@@ -115,30 +116,31 @@ describe("lift against the city list", () => {
   });
 });
 
-describe("audience card provenance", () => {
+describe("audience card", () => {
   const tagBody = (rows: [string, string, number][]) => ({ success: true, results: { tags: rows.map(([id, subtype, affinity]) => ({ tag_id: id, name: id.split(":").pop(), types: ["urn:entity:place"], subtype, query: { affinity } })) } });
-  it("ranks real tags by lift, scores real brands by nines, and says brands are synthetic when they have no recording", async () => {
-    const { buildAudienceCard } = await import("./card");
-    const { syntheticRecordings } = await import("./synthetic");
-    const c = await replayOf(
-      rec("city-tags", "/v2/insights", { "filter.type": "urn:tag", "signal.location.query": "Atlanta", take: 50 }, tagBody([["u:lively", "urn:tag:ambience:qloo", 0.9999], ["u:steak", "urn:tag:specialty_dish:place", 0.9991]])),
-      rec("tags-by-place", "/v2/insights", { "filter.type": "urn:tag", "signal.location": "POINT(-84.39 33.78)", take: 50 }, tagBody([["u:steak", "urn:tag:specialty_dish:place", 0.9995], ["u:lively", "urn:tag:ambience:qloo", 0.9993]])),
-      ...syntheticRecordings.filter((r) => r.kind === "brands-by-place"),
-    );
-    const { card, sources } = await buildAudienceCard(c, { id: "ATL-0020", lat: 33.78, lng: -84.39 });
-    expect(card.topTags[0]).toMatchObject({ name: "steak", lift: 2 });
-    expect(sources.tags.synthetic).toBe(false);
-    expect(sources.baseline).not.toBeNull();
-    expect(sources.brands.synthetic).toBe(true);
-    expect(card.brands[0].name).toContain("synthetic");
+  const city = rec("city-tags", "/v2/insights", { "filter.type": "urn:tag", "signal.location.query": "Atlanta", take: 50 }, tagBody([["u:lively", "urn:tag:ambience:qloo", 0.9999], ["u:steak", "urn:tag:specialty_dish:place", 0.9991]]));
+  const block = rec("tags-by-place", "/v2/insights", { "filter.type": "urn:tag", "signal.location": "POINT(-84.39 33.78)", take: 50 }, tagBody([["u:steak", "urn:tag:specialty_dish:place", 0.9995], ["u:lively", "urn:tag:ambience:qloo", 0.9993]]));
+  const brands = rec("brands-by-place", "/v2/insights", { "filter.type": "urn:entity:brand", "signal.location": "POINT(-84.39 33.78)", take: 10 }, {
+    success: true, results: { entities: [{ entity_id: "B1", name: "Lantern Street Brewing", subtype: "urn:entity:brand", popularity: 0.7, query: { affinity: 0.9994, measurements: { audience_growth: 0 } } }, { entity_id: "B2", name: "Peach Row Records", subtype: "urn:entity:brand", popularity: 0.5, query: { affinity: 0.998 } }] },
   });
-  it("does not lift a synthetic block against real Atlanta rows", async () => {
+  it("ranks tags by lift, scores brands by nines, and reports live request ids", async () => {
     const { buildAudienceCard } = await import("./card");
-    const { syntheticRecordings } = await import("./synthetic");
-    const c = await replayOf(rec("city-tags", "/v2/insights", { "filter.type": "urn:tag", "signal.location.query": "Atlanta", take: 50 }, tagBody([["u:lively", "urn:tag:ambience:qloo", 0.9999]])), ...syntheticRecordings);
-    const { card, sources } = await buildAudienceCard(c, { id: "ATL-0001", lat: 33.7, lng: -84.4 });
-    expect(sources.tags.synthetic).toBe(true);
-    expect(sources.baseline).toBeNull();
-    expect(card.topTags.every((t) => t.lift === null)).toBe(true);
+    const { client } = fakeQloo([city, block, brands]);
+    const { card, sources } = await buildAudienceCard(client, { id: "ATL-0020", lat: 33.78, lng: -84.39 });
+    expect(card.topTags[0]).toMatchObject({ name: "steak", lift: 2 });
+    expect(card.brands.map((b) => b.name)).toEqual(["Lantern Street Brewing", "Peach Row Records"]);
+    expect(card.brands[0].score).toBeGreaterThan(card.brands[1].score);
+    expect(sources.tags.requestId).toMatch(/^req-/);
+    expect(sources.brands.cached).toBe(false);
+    expect(sources.baseline).not.toBeNull();
+  });
+  it("shows tags without lift when only the Atlanta baseline fails, and fails the card when a block call fails", async () => {
+    const { buildAudienceCard } = await import("./card");
+    const noCity = fakeQloo([block, brands]).client;
+    const r = await buildAudienceCard(noCity, { id: "ATL-0020", lat: 33.78, lng: -84.39 });
+    expect(r.card.topTags.every((t) => t.lift === null)).toBe(true);
+    expect(r.sources.baseline).toBeNull();
+    const noBlock = fakeQloo([city, brands]).client;
+    await expect(buildAudienceCard(noBlock, { id: "ATL-0020", lat: 33.78, lng: -84.39 })).rejects.toMatchObject({ code: "bad_request" });
   });
 });

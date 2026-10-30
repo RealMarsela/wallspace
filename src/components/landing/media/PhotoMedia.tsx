@@ -40,7 +40,7 @@ export function PhotoMedia() {
   const reads = s.run.status === "ready" ? photoReads(s.run.data).slice(0, 2) : null;
   const first = reads?.[0];
   return (
-    <MediaFrame title="Site photo reads" meta={first?.model ? "Nemotron Super VL" : undefined}>
+    <MediaFrame title="Site photo reads" meta={first?.model ? "Nemotron 3.5 Super VL" : undefined}>
       {!reads ? (
         <MediaLoading failed={s.run.status === "error"} />
       ) : reads.length === 0 ? (

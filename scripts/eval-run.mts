@@ -5,6 +5,6 @@ import { executeEval } from "../src/server/workflows/eval-core";
 import { directRunner } from "../src/server/agent/steps";
 
 const n = Number(process.argv[2] ?? 10);
-const env = { ...process.env, STORE_DRIVER: "file", STORE_FILE: ".data/wallspace-store.json", TF_MODE: "live", QLOO_MODE: "replay" } as never;
+const env = { ...process.env, STORE_DRIVER: "file", STORE_FILE: ".data/wallspace-store.json", TF_MODE: "live", QLOO_MODE: "live" } as never;
 const r = await executeEval(env, { runId: `eval-local-${Date.now().toString(36)}`, at: new Date().toISOString(), briefCount: n }, directRunner);
 process.stdout.write(JSON.stringify(r, null, 1) + "\n");

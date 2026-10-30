@@ -40,6 +40,8 @@ test("a new buyer signs up, onboards, saves a brief, signs out and still reads t
   await expect(page.getByTestId("onboarding-done")).toBeVisible();
 
   await page.getByTestId("auth-sign-out").click();
+  await expect(page).not.toHaveURL(/\/app(\/|$)/);
+  await page.goto("/sample");
   await expect(page.getByTestId("auth-indicator")).toHaveAttribute("data-state", "signed-out");
   expect((await page.request.post("/api/briefs", { data: {} })).status()).toBe(401);
 

@@ -12,13 +12,13 @@
   "vars": {
     "STORE_DRIVER": "d1",
     "DATA_MODE": "app",
-    // Provider modes. Qloo stays in replay until QLOO_API_KEY exists and the owner says go (docs/BUILD.md).
-    "QLOO_MODE": "replay",
+    // Provider modes. Qloo is live only (30 Oct decision): a KV copy of an earlier live answer or a call to Qloo, never a recording or a fixture.
+    "QLOO_MODE": "live",
     "TF_MODE": "live",
     "TAVILY_MODE": "live",
-    // Hard Qloo call cap enforced by the QLOO_METER Durable Object.
-    "QLOO_CAP_TOTAL": "300",
-    "QLOO_CAP_DAY": "60",
+    // Hard Qloo call cap enforced by the QLOO_METER Durable Object (the key's 50,000-a-month pool is shared with one other project).
+    "QLOO_CAP_TOTAL": "6000",
+    "QLOO_CAP_DAY": "1500",
     "APP_URL": "https://wallspace.pages.dev"
     // Secrets (wrangler secret put, fed from the vault by scripts/deploy-secrets.sh): NEBIUS_API_KEY, TAVILY_API_KEY,
     // QLOO_API_KEY (when it exists), WALLSPACE_INGEST_SECRET. Never NEBIUS_SA_CREDENTIALS.

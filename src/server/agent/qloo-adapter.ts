@@ -5,7 +5,7 @@ import { CITY } from "../qloo/card";
 import type { QlooTag } from "../qloo/types";
 import type { BlockTag, Called, QlooPort, TrendRow, VocabItem } from "./ports";
 
-// Wraps lane B1's Qloo client (replay, KV cache, call cap, ledger all live inside it) into the pipeline's QlooPort.
+// Wraps lane B1's Qloo client (KV cache, call cap, ledger all live inside it) into the pipeline's QlooPort.
 // Shapes follow qloo-probe/SHAPES.md. The vocabulary is the two media/music genre namespaces of /v2/tags (audiences were never observed).
 const TAG_TYPES = ["urn:tag:genre:media", "urn:tag:genre:music"];
 /** /search is a name lookup: without a type filter, "90s sitcoms" returns a Newcastle comedy club and "southern hip-hop" a locality. */
@@ -13,7 +13,7 @@ const SEARCH_TYPES = "urn:entity:tv_show,urn:entity:movie,urn:entity:artist";
 const STOP = new Set(["the", "a", "an", "of", "and", "in", "to", "for", "with", "on"]);
 
 function called<T>(r: QlooResult<unknown>, tool: string, data: T): Called<T> {
-  return { data, cached: r.source.cached, ms: r.source.ms, tool: r.source.synthetic ? `${tool} (synthetic fixture)` : tool };
+  return { data, cached: r.source.cached, ms: r.source.ms, tool, requestId: r.source.requestId };
 }
 
 const words = (s: string) => s.toLowerCase().replace(/['’]/g, "").split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
@@ -44,9 +44,8 @@ export function qlooPortFor(c: QlooClient): QlooPort {
     },
     async search(query) {
       const r = await search(c, query, { types: SEARCH_TYPES, take: 3 });
-      // A synthetic fixture hit is not an answer to this query: only a real recording or a live answer can resolve a love to an entity.
       // Obscure rows (popularity unknown or under 0.5) make a poor anchor for a city-wide heatmap, so they are not taken either.
-      const hit = r.source.synthetic ? undefined : r.data.find((h) => (h.popularity ?? 0) >= 0.5 && nameMatches(query, h.name));
+      const hit = r.data.find((h) => (h.popularity ?? 0) >= 0.5 && nameMatches(query, h.name));
       const seed: Seed | null = hit ? { qlooId: hit.id, name: hit.name, type: hit.types[0] ?? "urn:entity", via: "search", similarity: null } : null;
       return called(r, "qloo.search", seed);
     },
@@ -58,9 +57,8 @@ export function qlooPortFor(c: QlooClient): QlooPort {
     },
     async blockTags(face) {
       const [r, city] = await Promise.all([tagsByPlace(c, face.lat, face.lng, { take: 50 }), baseline()]);
-      // Lift needs a real city list and a real block answer; a synthetic block is never compared with real Atlanta rows.
-      const useCity = !!city && !city.source.synthetic && !r.source.synthetic;
-      const rows: BlockTag[] = rankTags(r.data, useCity ? city.data : null).map((t) => ({ id: t.id, name: t.name, affinity: tagScore(t), lift: t.lift, synthetic: r.source.synthetic }));
+      const useCity = !!city;
+      const rows: BlockTag[] = rankTags(r.data, useCity ? city.data : null).map((t) => ({ id: t.id, name: t.name, affinity: tagScore(t), lift: t.lift }));
       return called(r, useCity ? "qloo.insights urn:tag + signal.location, lift vs Atlanta" : "qloo.insights urn:tag + signal.location", rows);
     },
     // Qloo has no trending for places or tags. The usable signal is bias.trends: a tag is "rising" when the trend-biased Atlanta list
@@ -68,7 +66,7 @@ export function qlooPortFor(c: QlooClient): QlooPort {
     async trending(tagNames) {
       const want = [...new Set(tagNames.map((n) => n.toLowerCase()))];
       const [plain, trend] = await Promise.all([cityTags(c, CITY, { take: 50 }).catch(() => null), cityTags(c, CITY, { take: 50, trends: "high" }).catch(() => null)]);
-      if (!plain || !trend || plain.source.synthetic || trend.source.synthetic) return { data: want.map((name) => ({ name, rising: false, delta: null })), cached: true, ms: 0, tool: "qloo.insights urn:tag bias.trends (no recorded signal; nothing marked rising)" };
+      if (!plain || !trend) return { data: want.map((name) => ({ name, rising: false, delta: null })), cached: true, ms: 0, tool: "qloo.insights urn:tag bias.trends (Qloo unavailable; nothing marked rising)" };
       const rank = (rows: QlooTag[]) => new Map(rows.map((t, i) => [t.name.toLowerCase(), i + 1] as const));
       const pr = rank(plain.data);
       const tr = rank(trend.data);

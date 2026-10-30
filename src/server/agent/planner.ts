@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { Brief, HeatCell, RunStep, Seed } from "@/contract";
-import type { ChatMessage, TokenFactory, ToolDef } from "../models";
+import { isModelUnavailable, type ChatMessage, type TokenFactory, type ToolDef } from "../models";
+import { QlooError } from "../qloo/types";
+import { skippedCodeStep, skippedStep } from "./outage";
 import type { QlooPort } from "./ports";
+import { PlanError } from "./steps";
 
 // Super VL is the planner: it chooses tool calls inside a fixed spine. Two failed tool-calling attempts -> the fixed spine runs and says so.
 
@@ -41,16 +44,32 @@ export async function resolveAndMap(tf: TokenFactory, qloo: QlooPort, brief: Pic
   let cachedAll = true;
   let failures = 0;
   let planned = false;
+  let plannerGone = false;
 
   const runSearch = async (query: string) => {
-    const r = await qloo.search(query);
+    let r;
+    try {
+      r = await qloo.search(query);
+    } catch (e) {
+      if (!(e instanceof QlooError)) throw e;
+      steps.push(skippedCodeStep("qloo", `resolve "${query}"`, "qloo.search", `skipped: Qloo search returned ${e.code}${e.status ? `, HTTP ${e.status}` : ""}; "${query}" is not resolved to an entity`, e.code));
+      return "no match";
+    }
     cachedAll = cachedAll && r.cached;
     if (r.data) seeds = dedupe([...seeds, { ...r.data, via: "search" }]);
     steps.push(qlooStep(`resolve "${query}"`, r.tool, r.data ? `${query} -> ${r.data.name}` : `${query}: no Qloo entity found`, r.ms, r.cached));
     return r.data ? `${r.data.name} (${r.data.qlooId})` : "no match";
   };
   const runHeatmap = async () => {
-    const r = await qloo.heatmap(seeds);
+    // Without seeds or a heatmap there is no plan: stop with a message the run panel can show.
+    if (!seeds.length) throw new PlanError("No taste seeds: the embedding model and Qloo search gave nothing to map. Try again later.", "no_seeds");
+    let r;
+    try {
+      r = await qloo.heatmap(seeds);
+    } catch (e) {
+      if (!(e instanceof QlooError)) throw e;
+      throw new PlanError(`The audience map could not be built (Qloo ${e.code}${e.status ? ` HTTP ${e.status}` : ""}), so no plan can be made. Try again later.`, "qloo_unavailable");
+    }
     cachedAll = cachedAll && r.cached;
     heat = r.data;
     steps.push(qlooStep("map the audience over Atlanta", r.tool, `${r.data.length} heat cells from ${seeds.length} seeds`, r.ms, r.cached));
@@ -66,7 +85,13 @@ export async function resolveAndMap(tf: TokenFactory, qloo: QlooPort, brief: Pic
     let res;
     try {
       res = await tf.chat({ role: "superVl", messages, tools, toolChoice: "auto", reasoning: failures === 0 ? "off" : "default", maxTokens: 600, temperature: 0, meta: { title: "plan the Qloo calls", tool: "tool calling" } });
-    } catch {
+    } catch (e) {
+      if (isModelUnavailable(e)) {
+        // The planner model is gone: record it and fall to the fixed spine below (search each love, one heatmap).
+        plannerGone = true;
+        steps.push(skippedStep("superVl", e, "plan the Qloo calls", "tool calling", "The fixed spine plans the Qloo calls instead."));
+        break;
+      }
       failures += 1;
       continue;
     }
@@ -87,7 +112,8 @@ export async function resolveAndMap(tf: TokenFactory, qloo: QlooPort, brief: Pic
         } else if (call.function.name === "qloo_heatmap") {
           out = await runHeatmap();
         } else failures += 1;
-      } catch {
+      } catch (e) {
+        if (e instanceof PlanError) throw e;
         failures += 1;
         out = "error: invalid arguments";
       }
@@ -101,7 +127,7 @@ export async function resolveAndMap(tf: TokenFactory, qloo: QlooPort, brief: Pic
     const searched = new Set(steps.filter((s) => s.role === "qloo").map((s) => s.title));
     for (const love of brief.loves.slice(0, 4)) if (!searched.has(`resolve "${love}"`)) await runSearch(love);
     await runHeatmap();
-    steps.push({ ...qlooStep("fixed spine", "fixed spine", planned ? "planner finished without a heatmap; the fixed spine ran it" : "planner tool calls failed twice; the fixed spine searched every love and ran the heatmap", 0, false), role: "super-vl" });
+    steps.push({ ...qlooStep("fixed spine", "fixed spine", plannerGone ? "planner model unavailable; the fixed spine searched every love and ran the heatmap" : planned ? "planner finished without a heatmap; the fixed spine ran it" : "planner tool calls failed twice; the fixed spine searched every love and ran the heatmap", 0, false), role: "super-vl" });
   }
   return { seeds, heat, steps, fixedSpine, qlooCached: cachedAll };
 }

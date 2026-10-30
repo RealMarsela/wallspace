@@ -6,11 +6,11 @@ export const basemap = (t: Theme) =>
 
 export const ATLANTA: [number, number] = [-84.39, 33.765];
 
-// Heat ramp, transparent at zero so the basemap shows through.
+// Heat ramp from the street inks: transparent, signal yellow, orange, poster red. Kept translucent so streets show through.
 export const heatRamp = (t: Theme) =>
   t === "dark"
-    ? ["rgba(0,0,0,0)", "rgba(110,55,10,0.35)", "rgba(190,90,15,0.55)", "rgba(240,122,18,0.72)", "rgba(255,170,90,0.85)", "rgba(255,226,170,0.92)"]
-    : ["rgba(255,255,255,0)", "rgba(246,217,182,0.45)", "rgba(244,178,110,0.6)", "rgba(238,116,16,0.68)", "rgba(190,80,10,0.76)", "rgba(140,50,5,0.82)"];
+    ? ["rgba(0,0,0,0)", "rgba(255,209,46,0.10)", "rgba(255,209,46,0.30)", "rgba(255,138,61,0.48)", "rgba(255,91,58,0.62)", "rgba(255,155,107,0.78)"]
+    : ["rgba(255,255,255,0)", "rgba(255,209,46,0.14)", "rgba(255,209,46,0.36)", "rgba(255,138,61,0.50)", "rgba(255,91,58,0.62)", "rgba(226,64,31,0.74)"];
 
 // MapLibre 6's own relative worker URL breaks under the bundler, and a third-party CDN worker is blocked by some
 // browsers (Brave Shields), so the worker is served same-origin from public/vendor. Must match the installed version;

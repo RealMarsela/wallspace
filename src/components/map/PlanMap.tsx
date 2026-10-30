@@ -81,10 +81,10 @@ export function PlanMap({ heat, faces, picks, selectedFaceId, onSelectFace, padd
           type: "heatmap",
           source: "heat",
           paint: {
-            "heatmap-weight": ["interpolate", ["linear"], ["get", "a"], 0, 0, 0.25, 0.08, 0.6, 0.5, 1, 1],
-            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.9, 14, 1.6],
-            "heatmap-radius": ["interpolate", ["exponential", 2], ["zoom"], 10, 24, 12, 72, 14, 280],
-            "heatmap-opacity": 0.9,
+            "heatmap-weight": ["interpolate", ["linear"], ["get", "a"], 0, 0, 0.3, 0.02, 0.55, 0.25, 0.8, 0.7, 1, 1],
+            "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.35, 12, 0.5, 14, 0.8],
+            "heatmap-radius": ["interpolate", ["exponential", 2], ["zoom"], 10, 14, 12, 40, 14, 150],
+            "heatmap-opacity": 0.95,
             "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, ramp[0], 0.15, ramp[1], 0.35, ramp[2], 0.6, ramp[3], 0.85, ramp[4], 1, ramp[5]],
           },
         });
@@ -102,8 +102,8 @@ export function PlanMap({ heat, faces, picks, selectedFaceId, onSelectFace, padd
           source: "faces",
           paint: {
             "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 5],
-            "circle-color": theme === "dark" ? "#c9cbd1" : "#2a2c31",
-            "circle-stroke-color": theme === "dark" ? "#0e0f12" : "#ffffff",
+            "circle-color": theme === "dark" ? "#d7d4cb" : "#22211d",
+            "circle-stroke-color": theme === "dark" ? "#131210" : "#fbfaf7",
             "circle-stroke-width": 1.2,
           },
         });
@@ -162,12 +162,12 @@ export function PlanMap({ heat, faces, picks, selectedFaceId, onSelectFace, padd
   }, [selectedFaceId, ready]);
 
   return (
-    <div className={`relative h-full w-full overflow-hidden bg-ground-2 ${className}`}>
-      <div ref={box} className="!absolute inset-0" aria-label="Map of Atlanta: audience heat in orange, picked faces as numbered green shields" role="region" />
+    <div className={`relative h-full w-full overflow-hidden bg-panel ${className}`}>
+      <div ref={box} className="!absolute inset-0" aria-label="Map of Atlanta: audience heat from yellow to red, picked faces as numbered green billboards" role="region" />
       {!ready && !failed ? <div aria-hidden className="skeleton absolute inset-0 !rounded-none opacity-60" /> : null}
       {failed ? (
-        <div data-testid="map-failed" className="absolute inset-0 grid place-items-center p-6 text-center text-sm text-ink-2">
-          The map tiles did not load. The picks and numbers beside it are unaffected.
+        <div data-testid="map-failed" className="absolute inset-0 grid place-items-center p-6 text-center text-small text-muted">
+          The map tiles did not load. The picks and numbers below are unaffected.
         </div>
       ) : null}
       {legend ? <MapLegend /> : null}

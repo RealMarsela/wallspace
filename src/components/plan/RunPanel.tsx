@@ -1,31 +1,49 @@
-import Link from "next/link";
 import type { Run } from "@/contract";
-import { ModelChip } from "@/components/ui/ModelChip";
+import { TextLink } from "@/components/ui/Button";
+import { ModelName } from "@/components/run/ModelName";
+import { Skeleton } from "@/components/ui/States";
 import { cents, ms } from "@/components/ui/format";
-import { roleUsage } from "./plan-derive";
 import { runHref } from "@/lib/routes";
+import { roleUsage } from "./plan-derive";
 
-/** Compact "which model did what" panel beside the map. */
+/** "Which model did what" beside the map: one row per model or tool, with its jobs, time and cost, and a link to the trace. */
 export function RunPanel({ run, error }: { run: Run | null; error?: string | null }) {
-  if (error) return <p data-testid="run-panel-error" className="text-[0.8rem] text-guard">Run not available: {error}</p>;
-  if (!run) return <div className="skeleton h-32" data-testid="run-panel-loading" />;
-  return (
-    <section data-testid="run-panel" className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-base">Which model did what</h2>
-        <Link href={runHref(run.id)} data-testid="run-panel-open" className="text-[0.8rem] text-info underline">
-          watch the run
-        </Link>
+  if (error)
+    return (
+      <p data-testid="run-panel-error" className="rounded-md border border-poster/30 bg-surface p-4 text-small text-guard">
+        Run not available: {error}
+      </p>
+    );
+  if (!run)
+    return (
+      <div data-testid="run-panel-loading" className="flex flex-col gap-2 rounded-md border border-line bg-surface p-4">
+        <Skeleton className="h-4 w-40" />
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-8" />
+        ))}
       </div>
-      <ul className="flex flex-col divide-y divide-rule-2 rounded border border-rule bg-panel">
+    );
+  return (
+    <section data-testid="run-panel" aria-labelledby="run-panel-title" className="flex flex-col rounded-md border border-line bg-surface">
+      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
+        <h2 id="run-panel-title" className="text-small text-ink">
+          Which model did what
+        </h2>
+        <TextLink href={runHref(run.id)} testId="run-panel-open" className="text-micro">
+          Watch the run
+        </TextLink>
+      </div>
+      <ul className="flex flex-col">
         {roleUsage(run).map((u) => (
-          <li key={u.role} data-testid={`run-panel-role-${u.role}`} className="grid grid-cols-[auto_1fr_auto] items-start gap-2 px-2 py-1.5">
-            <ModelChip role={u.role} model={u.model} />
-            <span className="min-w-0 text-[0.78rem] text-ink-2">
-              {u.titles.join("; ")}
-              {u.steps > u.titles.length ? <span className="text-muted"> · {u.steps} steps</span> : null}
+          <li key={u.role} data-testid={`run-panel-role-${u.role}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 border-b border-line-2 px-4 py-2.5 last:border-b-0">
+            <span className="flex min-w-0 flex-col items-start gap-1">
+              <ModelName role={u.role} model={u.model} />
+              <span className="text-micro text-ink-2">
+                {u.titles.join("; ")}
+                {u.steps > u.titles.length ? <span className="text-muted"> · {u.steps} steps</span> : null}
+              </span>
             </span>
-            <span className="text-right text-[0.72rem] tnum text-muted">
+            <span className="text-right font-mono text-[0.68rem] leading-relaxed tabular-nums text-muted">
               {ms(u.ms)}
               <br />
               {u.costUsd > 0 ? cents(u.costUsd) : "–"}

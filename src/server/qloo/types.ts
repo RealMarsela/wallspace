@@ -5,16 +5,16 @@ import { z } from "zod";
 // shared probe's SHAPES.md. `normalize*` functions turn them into the small types the app uses.
 
 export const QLOO_BASE = "https://hackathon.api.qloo.com";
-export type QlooMode = "replay" | "live";
+export type QlooMode = "live"; // the only mode: every answer is a live Qloo call or a KV copy of one
 
-/** Kinds of request the app makes. Each has a default recording used by replay when no exact recording matches. */
+/** Kinds of request the app makes. */
 export type QlooKind =
   | "search" | "entities" | "audiences" | "tags" | "heatmap" | "tags-by-place" | "city-tags" | "brands-by-place" | "demographics" | "explain";
 
 export type QlooParams = Record<string, string | number | boolean | undefined>;
 
 export class QlooError extends Error {
-  constructor(message: string, readonly code: "no_key" | "cap_reached" | "http" | "bad_request" | "network" | "shape" | "no_recording", readonly status?: number) {
+  constructor(message: string, readonly code: "no_key" | "cap_reached" | "http" | "bad_request" | "network" | "shape", readonly status?: number) {
     super(message);
     this.name = "QlooError";
   }
@@ -85,15 +85,3 @@ export interface QlooTag { id: string; name: string; type: string | null; affini
 export interface QlooBrand { id: string; name: string; affinity: number | null; popularity: number | null; audienceGrowth: number | null }
 export interface QlooAudience { id: string; name: string; type: string | null }
 export type DemographicBucket = Record<string, number>; // "age:25_to_29" -> 0.31, "gender:female" -> 0.12 (affinity, -1..1)
-
-/** One recorded or synthetic exchange. Private recordings (fixtures/qloo-private/) hold real responses; committed fixtures are labelled synthetic. */
-export const Recording = z.object({
-  kind: z.string(),
-  endpoint: z.string(),
-  params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
-  response: z.unknown(),
-  synthetic: z.boolean().optional(),
-  recordedAt: z.string().optional(),
-  default: z.boolean().optional(), // use for any request of this kind that has no exact recording
-});
-export type Recording = z.infer<typeof Recording>;

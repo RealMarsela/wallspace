@@ -73,7 +73,7 @@ export function RunFragment() {
           const r = roles[st.role as Role];
           return (
             <li key={st.id} className="ws-fade-up grid grid-cols-[5.5rem_1fr_auto] items-center gap-2 text-micro" style={{ "--delay": `${200 + i * 110}ms` } as CSSProperties}>
-              <span className="inline-flex items-center gap-1 truncate rounded-xs border border-line px-1.5 py-0.5 font-mono text-[0.64rem]">
+              <span title={r?.name} aria-label={r?.name} className="inline-flex items-center gap-1 truncate rounded-xs border border-line px-1.5 py-0.5 font-mono text-[0.64rem]">
                 <i aria-hidden className="size-1.5 shrink-0 rounded-[2px]" style={{ background: r?.swatch }} />
                 {r?.label ?? st.role}
               </span>

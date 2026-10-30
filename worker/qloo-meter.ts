@@ -7,7 +7,7 @@ interface MeterEnv {
 }
 
 /**
- * QLOO_METER: one global instance ("qloo") counting live Qloo calls against a hard cap (default 300 total, 60 a day;
+ * QLOO_METER: one global instance ("qloo") counting live Qloo calls against a hard cap (default 6,000 total, 1,500 a day;
  * override with the QLOO_CAP_TOTAL and QLOO_CAP_DAY variables). Only worker/index.ts imports this file.
  * Requests: POST /reserve {n?}, POST /refund {n?}, GET /status. A refused reserve answers 429 with the reason.
  */

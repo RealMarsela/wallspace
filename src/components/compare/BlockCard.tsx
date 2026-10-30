@@ -1,47 +1,121 @@
+"use client";
 import Link from "next/link";
 import type { Face } from "@/contract";
-import { FaceBox } from "@/components/board/FaceBox";
-import { Pill, SampleStamp } from "@/components/ui/Pill";
+import { faceRatio } from "@/components/board/FaceBox";
+import { Listbox, type ListOption } from "@/components/ui/Listbox";
+import { SampleStamp, Tag, inkVar, type Ink } from "@/components/ui/Pill";
+import { ScoreBar } from "@/components/ui/ScoreBar";
+import { ArrowRight } from "@/components/ui/icons";
 import { aff, kindName } from "@/components/ui/format";
-import type { Block } from "./compare-derive";
 import { faceHref } from "@/lib/routes";
+import { liftsFor, type Block } from "./compare-derive";
 
-export function BlockCard({ side, block, faces, planId, onPick }: { side: "a" | "b"; block: Block; faces: Face[]; planId: string; onPick: (id: string) => void }) {
-  const { face, pick } = block;
-  const line = pick ? (pick.copy[pick.chosenCopy]?.text ?? null) : null;
+const TAG_INKS: Ink[] = ["signal", "lilac", "park", "cobalt", "poster"];
+
+/** The face at its true proportion, ringed in the block's street ink, on a post, with the line it carries. */
+function BillboardFace({ face, line, ink, testId }: { face: Face; line: string | null; ink: string; testId: string }) {
+  const { w, h } = faceRatio(face.kind, face.widthFt, face.heightFt);
+  const portrait = h > w;
   return (
-    <section data-testid={`compare-block-${side}`} data-face-id={face.id} className="flex min-w-0 flex-col gap-2 rounded border border-rule bg-panel p-3">
-      <label className="flex flex-col gap-1">
-        <span className="eyebrow">Block {side.toUpperCase()}</span>
-        <select data-testid={`compare-select-${side}`} value={face.id} onChange={(e) => onPick(e.target.value)} className="h-9 rounded border border-rule bg-panel px-2 text-[0.85rem]">
-          {faces.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.neighbourhood} · {f.name} ({f.id})
-            </option>
-          ))}
-        </select>
-      </label>
-      <FaceBox kind={face.kind} widthFt={face.widthFt} heightFt={face.heightFt} text={line} testId={`compare-face-${side}`} />
-      <p className="flex flex-wrap items-center gap-2 text-[0.8rem] text-ink-2">
-        {face.neighbourhood} · {kindName(face.kind).toLowerCase()}
-        {face.location === "sample" ? <SampleStamp>sample face</SampleStamp> : null}
-      </p>
-      <p data-testid={`compare-affinity-${side}`} className="text-[0.88rem]">
-        Affinity <strong className="tnum">{aff(block.affinity)}</strong>{" "}
-        <span className="text-[0.75rem] text-muted">{block.source === "pick" ? `pick ${pick?.rank}` : "nearest heat cell · not picked"}</span>
-      </p>
-      <div data-testid={`compare-tags-${side}`} className="flex flex-wrap gap-1">
-        {pick ? (
-          pick.topTags.map((t) => <Pill key={t}>{t}</Pill>)
+    <div className="flex flex-col items-center">
+      <div
+        data-testid={testId}
+        data-kind={face.kind}
+        role="img"
+        aria-label={line ? `Face reads: ${line}` : "No line written for this face"}
+        className={`grid w-full place-items-center rounded-md border-[3px] bg-surface p-3 text-center ${portrait ? "max-w-[150px]" : "max-w-[460px]"}`}
+        style={{ aspectRatio: `${w} / ${h}`, borderColor: ink }}
+      >
+        {line ? (
+          <span className="font-display text-[clamp(1rem,0.8rem+0.8vw,1.35rem)] leading-tight tracking-[-0.01em] text-ink">{line}</span>
         ) : (
-          <span className="text-[0.8rem] text-muted">Block tastes are only fetched for picked faces.</span>
+          <span className="text-small text-muted">No line: not picked for this plan</span>
         )}
       </div>
-      {pick ? (
-        <Link href={faceHref(planId, face.id)} data-testid={`compare-open-${side}`} className="text-[0.8rem] text-info underline">
-          Open face sheet
-        </Link>
-      ) : null}
+      <i aria-hidden className="block h-4 w-2.5 rounded-b-[2px]" style={{ background: ink }} />
+    </div>
+  );
+}
+
+export function BlockCard({
+  side,
+  block,
+  options,
+  planId,
+  onPick,
+  ink,
+  hotter,
+}: {
+  side: "a" | "b";
+  block: Block;
+  options: ListOption[];
+  planId: string;
+  onPick: (id: string) => void;
+  ink: Ink;
+  hotter: boolean;
+}) {
+  const { face, pick } = block;
+  const line = pick ? (pick.copy[pick.chosenCopy]?.text ?? null) : null;
+  const lifts = liftsFor(block);
+  const color = inkVar[ink as keyof typeof inkVar] ?? "var(--line)";
+  return (
+    <section
+      data-testid={`compare-block-${side}`}
+      data-face-id={face.id}
+      aria-label={`Block ${side.toUpperCase()}: ${face.neighbourhood}`}
+      className={`flex min-w-0 flex-col overflow-hidden rounded-lg border bg-surface ${hotter ? "border-ink shadow-md" : "border-line"}`}
+    >
+      <div className="flex flex-col gap-2 border-b border-line bg-panel px-4 py-3">
+        <div className="flex min-h-6 items-center justify-between gap-2">
+          <span className="eyebrow flex items-center gap-2">
+            <i aria-hidden className="size-2.5 rounded-xs" style={{ background: color }} />
+            Block {side.toUpperCase()}
+          </span>
+          {hotter ? <Tag ink="park" dot>Hotter block</Tag> : null}
+        </div>
+        <Listbox value={face.id} onChange={onPick} options={options} label={`Face for block ${side.toUpperCase()}`} searchable testId={`compare-select-${side}`} size="sm" />
+      </div>
+      <div className="flex flex-1 flex-col gap-5 p-4 sm:p-5">
+        <BillboardFace face={face} line={line} ink={color} testId={`compare-face-${side}`} />
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-small text-ink-2">
+          <span className="text-ink">{face.neighbourhood}</span>
+          <span className="text-muted">·</span>
+          <span>{kindName(face.kind)}</span>
+          <span className="font-mono text-micro text-muted">{face.id}</span>
+          {face.location === "sample" ? <SampleStamp>sample face</SampleStamp> : null}
+        </div>
+        <div data-testid={`compare-affinity-${side}`} className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-small text-muted">Audience affinity</span>
+            <strong className="font-mono text-h3 font-medium tabular-nums">{aff(block.affinity)}</strong>
+          </div>
+          <ScoreBar value={block.affinity} tone={hotter ? "picked" : "heat"} label={`Audience affinity ${aff(block.affinity)}`} />
+          <span className="text-micro text-muted">
+            Pick {pick?.rank}: Qloo heatmap affinity of the cell this face sits in
+          </span>
+        </div>
+        <div className="flex flex-col gap-2">
+          <span className="text-small text-muted">What this block over-indexes on</span>
+          <div data-testid={`compare-tags-${side}`} className="flex flex-wrap gap-1.5">
+            {lifts.length ? (
+              lifts.map((l, i) => (
+                <Tag key={l.tag} ink={TAG_INKS[i % TAG_INKS.length]} title={l.lift ? `${l.lift} vs Atlanta` : undefined}>
+                  {l.tag}
+                  {l.lift ? <b className="font-mono font-medium">{l.lift}</b> : null}
+                </Tag>
+              ))
+            ) : (
+              <span className="text-small text-muted">Block tastes are fetched for picked faces only.</span>
+            )}
+          </div>
+        </div>
+        {pick ? (
+          <Link href={faceHref(planId, face.id)} data-testid={`compare-open-${side}`} className="group mt-auto inline-flex items-center gap-1.5 self-start text-small text-ink underline-offset-4 hover:underline">
+            Open the face sheet
+            <ArrowRight size={15} className="ws-arrow" />
+          </Link>
+        ) : null}
+      </div>
     </section>
   );
 }

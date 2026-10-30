@@ -82,6 +82,17 @@ describe("plan pipeline", () => {
     expect(await store.getPlan("plan-1")).toBeTruthy();
   });
 
+  it("never ships a fragment: faces whose copy keeps failing the complete-phrase check are flagged for a human", async () => {
+    const { plan, run } = await runPlanPipeline(
+      { tf: tfFor((n) => `Catch the ${n % 2 ? "" : "and"}`.trim()), qloo, scoring, faces, kv: new MemoryKv(), tavily: null, budget: null, store: new MemoryStore(), emit: async () => {}, step: directRunner, sessionId: "s1", bucket: "visitor" },
+      { brief, planId: "plan-2", runId: "run-2", sample: false },
+    );
+    expect(plan.status).toBe("ready");
+    expect(plan.picks.every((p) => p.copy.length === 0)).toBe(true);
+    expect(plan.picks.every((p) => p.review.status === "flagged" && /^.*Copy needs a human/.test(p.review.note ?? ""))).toBe(true);
+    expect(run.steps.filter((s) => s.role === "lightning" && s.status === "error").length).toBeGreaterThanOrEqual(9); // every rejected attempt stays in the trace
+  });
+
   it("stops at the guard when the brief targets identity", async () => {
     await expect(runPlanPipeline(
       { tf: tfFor(() => "x"), qloo, scoring, faces, kv: new MemoryKv(), tavily: null, budget: null, store: new MemoryStore(), emit: async () => {}, step: directRunner, sessionId: "s", bucket: "visitor" },

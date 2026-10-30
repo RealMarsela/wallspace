@@ -7,9 +7,8 @@ import { getJson, isMock, wait } from "@/components/site/request";
 // Additive field from B1: where the card's numbers came from. Optional so older responses still parse.
 export const CardSource = z.object({
   mode: z.string(),
-  recorded: z.boolean(),
-  exact: z.boolean(),
-  synthetic: z.boolean(),
+  cached: z.boolean(), // true: a KV copy of an earlier live Qloo call
+  requestIds: z.array(z.string()), // x-qloo-request-id of each live call behind this card
   label: z.string().nullable(),
 });
 export type CardSource = z.infer<typeof CardSource>;
@@ -67,16 +66,19 @@ export async function fetchCard(faceId: string): Promise<CardData> {
     await wait(220);
     const face = sampleFaces.find((f) => f.id === faceId);
     if (!face) throw new ApiFailure("No face with that id in the sample inventory.", 404, "not_found");
-    const source = { mode: "mock", recorded: false, exact: false, synthetic: true, label: "synthetic sample" };
+    const source = { mode: "mock", cached: false, requestIds: [], label: "sample data (development only)" };
     return CardResponse.parse({ card: sampleCard(face), face, source });
   }
   return getJson(`/api/owner/faces/${encodeURIComponent(faceId)}/card`, CardResponse);
 }
 
-export const PitchRequest = z.object({ provider: z.string(), to: z.string().email(), brand: z.string(), note: z.string().max(2000).nullable() });
+// Mail pitches need a recipient e-mail; a Slack share takes an optional channel (empty = the workspace's default channel).
+export const PitchRequest = z
+  .object({ provider: z.enum(["gmail", "outlook", "slack"]), to: z.string().max(200).nullable(), note: z.string().max(2000).nullable() })
+  .refine((p) => p.provider === "slack" || z.string().email().safeParse(p.to).success, { message: "A valid recipient e-mail is required.", path: ["to"] });
 export type PitchInput = z.infer<typeof PitchRequest>;
 
-/** Proposed route POST /api/owner/faces/:id/pitch (not in the contract yet): mails the pitch sheet through a connected mail tool. */
+/** POST /api/owner/faces/:id/pitch: mails the pitch sheet through a connected mail tool, or shares it in Slack. */
 export async function sendPitch(faceId: string, input: PitchInput): Promise<PitchResult> {
   const body = PitchRequest.parse(input);
   if (isMock()) {
@@ -88,7 +90,7 @@ export async function sendPitch(faceId: string, input: PitchInput): Promise<Pitc
 
 /** The pitch sheet as plain text: used for download, the mailto fallback and the mail body. */
 export function pitchSheet(face: Face, card: AudienceCard, ownerName: string): string {
-  const tags = card.topTags.map((t) => `- ${t.name} (${t.score.toFixed(2)})`).join("\n");
+  const tags = card.topTags.map((t) => `- ${t.name}${t.lift ? ` (${t.lift}x vs Atlanta)` : ` (${t.score.toFixed(2)})`}`).join("\n");
   const brands = card.brands.map((b, i) => `${i + 1}. ${b.name} (${b.score.toFixed(2)})`).join("\n");
   return [
     `${face.id} · ${face.name} · ${face.neighbourhood}, Atlanta`,

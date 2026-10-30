@@ -1,8 +1,6 @@
 import type { WallspaceEnv } from "../db/bindings";
 import { getStore } from "../db";
-import { QlooClient, type QlooDeps } from "./client";
-import { KvReplay, MemoryReplay, loadRecordings, type ReplaySource } from "./replay";
-import { ChainedReplay, syntheticReplay } from "./synthetic";
+import { QlooClient } from "./client";
 
 export * from "./endpoints";
 export { QlooClient, type QlooResult, type QlooSource } from "./client";
@@ -10,29 +8,18 @@ export { QlooError } from "./types";
 export type { QlooMode } from "./types";
 export { buildAudienceCard } from "./card";
 
-async function replaySourceFor(env: WallspaceEnv): Promise<ReplaySource> {
-  const sources: ReplaySource[] = [];
-  if (env.WS_KV) sources.push(new KvReplay(env.WS_KV)); // production: private recordings loaded by scripts/qloo-load-replay.ts
-  else {
-    try { // dev: private recordings on disk when present
-      const recs = await loadRecordings(["fixtures/qloo-private/recordings"]);
-      if (recs.length) sources.push(await MemoryReplay.from(recs));
-    } catch { /* not node */ }
-  }
-  sources.push(await syntheticReplay());
-  return new ChainedReplay(sources);
-}
+/** Judging caps: the key's 50,000-a-month pool is shared with one other project; 6,000 total / 1,500 a day leaves it ample headroom. */
+export const QLOO_CAPS = { total: 6000, day: 1500 };
 
 /**
- * The Qloo client for this environment. QLOO_MODE=live with QLOO_API_KEY present: live (KV-cached, QLOO_METER-capped, ledgered).
- * Anything else: replay, which never calls Qloo. A live mode without a key falls back to replay rather than failing a page.
+ * The Qloo client. Always live: a KV copy of an earlier live answer when there is one (14 days), else a call to Qloo counted by the
+ * QLOO_METER Durable Object and written back to KV. Without QLOO_API_KEY every call fails with QlooError "no_key"; nothing is invented.
  */
-export async function qlooClientFor(env: WallspaceEnv & Record<string, unknown>, context?: { planId?: string; runId?: string }, hooks?: { onMiss?: QlooDeps["onMiss"] }): Promise<QlooClient> {
-  const live = env.QLOO_MODE === "live" && !!env.QLOO_API_KEY;
+export async function qlooClientFor(env: WallspaceEnv & Record<string, unknown>, context?: { planId?: string; runId?: string }): Promise<QlooClient> {
   const num = (v: string | undefined) => (v && Number(v) > 0 ? Number(v) : undefined);
   return new QlooClient({
-    mode: live ? "live" : "replay", apiKey: env.QLOO_API_KEY, kv: env.WS_KV, meter: env.QLOO_METER,
-    caps: { total: num(env.QLOO_CAP_TOTAL) ?? 300, day: num(env.QLOO_CAP_DAY) ?? 60 },
-    store: await getStore(env).catch(() => undefined), replay: live ? undefined : await replaySourceFor(env), context, onMiss: hooks?.onMiss,
+    apiKey: env.QLOO_API_KEY, kv: env.WS_KV, meter: env.QLOO_METER,
+    caps: { total: num(env.QLOO_CAP_TOTAL) ?? QLOO_CAPS.total, day: num(env.QLOO_CAP_DAY) ?? QLOO_CAPS.day },
+    store: await getStore(env).catch(() => undefined), context,
   });
 }

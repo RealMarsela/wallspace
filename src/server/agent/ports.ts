@@ -15,6 +15,7 @@ export interface Called<T> {
   cached: boolean;
   ms: number;
   tool: string; // "qloo.insights urn:heatmap"
+  requestId?: string | null; // x-qloo-request-id when this was a live Qloo call, null for a KV copy of one
 }
 
 export interface VocabItem {
@@ -29,7 +30,6 @@ export interface BlockTag {
   name: string;
   affinity: number; // 0..1 (Qloo's number when there is no city baseline; with one, a lift score 0..1, see qloo-adapter)
   lift?: number | null; // block vs Atlanta: 1 = same as the city, 3 = three times closer to "everyone here"
-  synthetic?: boolean; // true when this block's answer is the labelled synthetic fixture, not a Qloo recording
 }
 
 export interface TrendRow {

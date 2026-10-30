@@ -14,6 +14,6 @@ export function redraftFor(store: Store, tf: TokenFactory): Redraft {
     const face = faces.find((f) => f.id === faceId);
     if (!face) return null;
     const r = await writeCopy(tf, { brief, face, topTags: pick.topTags, events: pick.events, redraftNote: `NeMo Guardrails blocked a line: ${reasons.join(" ")}` });
-    return r.lines;
+    return r.needsHuman ? null : r.lines; // a redraft that fails the complete-phrase check leaves the current lines
   };
 }

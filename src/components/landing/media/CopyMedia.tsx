@@ -33,7 +33,7 @@ export function CopyMedia() {
             </div>
           </div>
           <div>
-            <p className="eyebrow">Three lines · Nemotron Lightning</p>
+            <p className="eyebrow">Three lines · Nemotron 3.5 Lightning</p>
             <ol className="mt-2 flex flex-col gap-2">
               {row.lines.map((l, i) => {
                 const d = 700 + i * 950;

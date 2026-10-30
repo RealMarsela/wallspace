@@ -6,9 +6,10 @@ export const AUTH_EVENT = "wallspace:auth";
 // One /api/me answer is shared by every link and guard on a page: calls inside CACHE_MS reuse it; a sign-in, sign-out or setup change clears it.
 const CACHE_MS = 15_000;
 let cached: { at: number; promise: Promise<MeResponse> } | null = null;
-export const notifyAuthChanged = () => {
-  cached = null;
-  window.dispatchEvent(new Event(AUTH_EVENT));
+/** Clears the shared answer and tells every useMe to reload. Pass a fresh answer to hand it over directly (no refetch race). */
+export const notifyAuthChanged = (fresh?: MeResponse) => {
+  cached = fresh ? { at: Date.now(), promise: Promise.resolve(fresh) } : null;
+  window.dispatchEvent(new CustomEvent<MeResponse | undefined>(AUTH_EVENT, { detail: fresh }));
 };
 
 export async function sendJson(method: "POST" | "PATCH", path: string, body?: unknown): Promise<unknown> {

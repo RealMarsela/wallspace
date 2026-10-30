@@ -1,43 +1,53 @@
-import Link from "next/link";
 import { FaceBox } from "@/components/board/FaceBox";
-import { Pill, SampleStamp } from "@/components/ui/Pill";
-import { aff, kindName } from "@/components/ui/format";
-import type { PickRow } from "./plan-derive";
+import { TextLink } from "@/components/ui/Button";
+import { SampleStamp, Tag, type Ink } from "@/components/ui/Pill";
+import { aff, kindName, usd } from "@/components/ui/format";
 import { faceHref } from "@/lib/routes";
+import { CheckChips } from "./CheckChips";
+import type { PickChecks, PickRow } from "./plan-derive";
 
-/** The selected pick: its face with the chosen line, the block's tags, and a link to the face sheet. */
-export function SelectedFace({ row, planId }: { row: PickRow; planId: string }) {
+const INKS: Ink[] = ["signal", "lilac", "park", "cobalt", "poster"];
+
+/** The selected pick beside the map: its face with the chosen line, the block's tags, checks and a link to the face sheet. */
+export function SelectedFace({ row, planId, checks }: { row: PickRow; planId: string; checks: PickChecks }) {
   const { pick, face } = row;
   const line = pick.copy[pick.chosenCopy]?.text ?? null;
   return (
-    <section data-testid="selected-face" data-face-id={pick.faceId} className="flex flex-col gap-2 rounded border border-rule bg-panel p-3">
-      <div className="flex items-center justify-between gap-2 text-[0.88rem]">
-        <span className="font-semibold">
-          #{pick.rank} {face?.name ?? pick.faceId}
+    <section data-testid="selected-face" data-face-id={pick.faceId} aria-label={`Selected face ${pick.faceId}`} className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block font-mono text-micro text-muted">
+            #{String(pick.rank).padStart(2, "0")} · {pick.faceId}
+          </span>
+          <span className="block truncate text-body text-ink">{face?.name ?? pick.faceId}</span>
         </span>
-        <span className="tnum">{aff(pick.affinity)}</span>
+        <span className="shrink-0 text-right">
+          <span className="block font-mono text-body tabular-nums">{aff(pick.affinity)}</span>
+          <span className="block text-[0.68rem] text-muted">affinity</span>
+        </span>
       </div>
       {face ? <FaceBox kind={face.kind} widthFt={face.widthFt} heightFt={face.heightFt} text={line} testId="selected-face-box" /> : null}
       {face ? (
-        <p className="flex flex-wrap items-center gap-x-2 text-[0.72rem] text-muted">
-          <span>{face.id}</span>
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-muted">
+          <span>{face.neighbourhood}</span>·
           <span>
-            {kindName(face.kind).toLowerCase()} {face.heightFt}×{face.widthFt} ft
+            {kindName(face.kind)} {face.heightFt}×{face.widthFt} ft
           </span>
-          <span>{face.readSide}-hand read</span>
-          {face.lit ? <span>lit</span> : null}
+          ·<span>{usd(pick.costUsd)} flight</span>
           {face.location === "sample" ? <SampleStamp>sample face</SampleStamp> : null}
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-1">
-        <span className="text-[0.72rem] text-muted">over-indexes on</span>
-        {pick.topTags.slice(0, 4).map((t) => (
-          <Pill key={t}>{t}</Pill>
+        {pick.topTags.slice(0, 4).map((t, i) => (
+          <Tag key={t} ink={INKS[i % INKS.length]}>
+            {t}
+          </Tag>
         ))}
       </div>
-      <Link href={faceHref(planId, pick.faceId)} data-testid="selected-face-open" className="text-[0.85rem] text-info underline">
+      <CheckChips checks={checks} faceId={`sel-${pick.faceId}`} />
+      <TextLink href={faceHref(planId, pick.faceId)} testId="selected-face-open">
         Open the face sheet
-      </Link>
+      </TextLink>
     </section>
   );
 }

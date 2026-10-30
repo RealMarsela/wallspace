@@ -1,5 +1,5 @@
 import type { Face, MediaOwner } from "@/contract";
-import { PRIVACY_LINE } from "../mail/pitch-email";
+import { PRIVACY_LINE, ownerLabel } from "../mail/pitch-email";
 import type { AudienceCardBundle } from "../composio/pitch-source";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -13,7 +13,7 @@ export function pitchBlocks(face: Face, owner: MediaOwner | null, card: Audience
   const brands = card.brands.slice(0, 5).map((b) => `${b.name} ${pts(b.score)}`).join("  ·  ");
   const blocks: Record<string, unknown>[] = [
     { type: "header", text: { type: "plain_text", text: pitchText(face).slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*${owner?.name ?? "Media owner"}${owner?.sample ? " (sample)" : ""}*  ·  ${face.widthFt}×${face.heightFt} ft${face.lit ? ", lit" : ""}  ·  ${usd(face.rateMonthUsd)} a month (sample rate)` } },
+    { type: "section", text: { type: "mrkdwn", text: `*${ownerLabel(owner)}*  ·  ${face.widthFt}×${face.heightFt} ft${face.lit ? ", lit" : ""}  ·  ${usd(face.rateMonthUsd)} a month (sample rate)` } },
     { type: "section", text: { type: "mrkdwn", text: `*Who lives around it*\n${tags}\n*Brands that over-index*\n${brands}` } },
   ];
   if (note) blocks.splice(1, 0, { type: "section", text: { type: "mrkdwn", text: note.slice(0, 1500) } });

@@ -1,18 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import type { Connection } from "@/contract";
-import { connect, disconnect, realtimeLabel } from "./connections-api";
-
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Kuala_Lumpur", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) + " MYT";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { connect, disconnect, metaFor } from "./connections-api";
+import { EventList, when } from "./EventList";
+import { ToolStop } from "./ToolStop";
 
 const statusText: Record<Connection["status"], string> = { connected: "Connected", "not-connected": "Not connected", error: "Needs attention" };
+const statusTone = { connected: "ok", "not-connected": "neutral", error: "guard" } as const;
 
-/** One customer tool: status, account label, realtime mechanism, last sync, event log, connect / disconnect. */
+/** One tool as a billboard-stop tile: logo on its street, status pill, what it does, account, how it syncs, last sync,
+ *  recent events, and connect / disconnect through the existing API (Composio or the Slack install by redirect). */
 export function ConnectionCard({ c, onChanged }: { c: Connection; onChanged: (next: Connection | null) => void }) {
   const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const meta = metaFor(c.provider);
+  const builtin = c.category === "ooh";
 
   async function onConnect() {
     setBusy("connect");
@@ -21,7 +28,7 @@ export function ConnectionCard({ c, onChanged }: { c: Connection; onChanged: (ne
       const r = await connect(c.provider);
       if (r.kind === "redirect") {
         window.location.assign(r.url);
-        return;
+        return; // stays "connecting" until the browser leaves for the provider's consent screen
       }
       onChanged({ ...c, status: "connected", account: "sample account (mock mode)", lastSyncAt: new Date().toISOString() });
     } catch (e) {
@@ -35,6 +42,7 @@ export function ConnectionCard({ c, onChanged }: { c: Connection; onChanged: (ne
     setError(null);
     try {
       await disconnect(c.provider);
+      setConfirming(false);
       onChanged(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not disconnect.");
@@ -43,62 +51,73 @@ export function ConnectionCard({ c, onChanged }: { c: Connection; onChanged: (ne
   }
 
   const connected = c.status === "connected";
+  const pill = busy === "connect" ? <Badge status="running" testId="conn-status">Connecting</Badge> : builtin ? <Badge status="info" testId="conn-status">Built in</Badge> : <Badge status={statusTone[c.status]} testId="conn-status">{statusText[c.status]}</Badge>;
+
   return (
-    <li data-testid="connection-card" data-provider={c.provider} data-status={c.status} className="rounded-[var(--radius)] border border-rule bg-panel p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-xl">{c.name}</h3>
-          <p className="mt-1 text-sm">
-            <span data-testid="conn-status" data-status={c.status} className={c.status === "error" ? "font-semibold text-guard" : connected ? "font-semibold text-ok" : "text-muted"}>
-              {statusText[c.status]}
-            </span>
-            {c.account && <> · <span data-testid="conn-account">{c.account}</span></>}
-          </p>
+    <li id={`conn-${c.provider}`} data-testid="connection-card" data-provider={c.provider} data-status={c.status} className="flex scroll-mt-24 flex-col overflow-hidden rounded-lg bg-panel">
+      <ToolStop logo={meta.logo} ink={meta.ink} lit={connected || builtin} error={c.status === "error"} name={c.name} />
+      <div className="flex flex-1 flex-col gap-4 p-5 pt-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-h4">{c.name}</h3>
+          <span data-status={c.status}>{pill}</span>
         </div>
-        {c.category === "ooh" ? (
-          <span data-testid="conn-builtin" className="text-sm text-muted">Built in: exported from each plan</span>
-        ) : connected || c.status === "error" ? (
-          <span className="flex gap-2">
-            {c.status === "error" && (
-              <button data-testid="conn-reconnect" type="button" onClick={onConnect} disabled={busy !== null} className="rounded-[var(--radius)] bg-ink px-3 py-1.5 text-sm font-semibold text-ground disabled:opacity-50">
-                {busy === "connect" ? "Opening…" : "Reconnect"}
-              </button>
-            )}
-            <button data-testid="conn-disconnect" type="button" onClick={onDisconnect} disabled={busy !== null} className="rounded-[var(--radius)] border border-rule px-3 py-1.5 text-sm font-semibold disabled:opacity-50">
-              {busy === "disconnect" ? "Disconnecting…" : "Disconnect"}
-            </button>
-          </span>
-        ) : (
-          <button data-testid="conn-connect" type="button" onClick={onConnect} disabled={busy !== null} className="rounded-[var(--radius)] bg-ink px-3 py-1.5 text-sm font-semibold text-ground disabled:opacity-50">
-            {busy === "connect" ? "Opening…" : `Connect ${c.name}`}
-          </button>
-        )}
+        <p className="text-small text-ink-2">{meta.does}</p>
+
+        <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t border-line pt-3 text-small">
+          {!builtin ? (
+            <>
+              <dt className="text-muted">Account</dt>
+              <dd data-testid="conn-account" className="truncate text-ink" title={c.account ?? undefined}>{c.account ?? (connected ? "Connected account" : "None yet")}</dd>
+            </>
+          ) : null}
+          <dt className="text-muted">Sync</dt>
+          <dd data-testid="conn-realtime" data-realtime={c.realtime} className="text-ink">{meta.sync}</dd>
+          {!builtin ? (
+            <>
+              <dt className="text-muted">Last sync</dt>
+              <dd data-testid="conn-last-sync" className="font-mono text-micro leading-5 text-ink">{c.lastSyncAt ? when(c.lastSyncAt) : "Never"}</dd>
+            </>
+          ) : null}
+        </dl>
+
+        {!builtin ? <EventList events={c.events} /> : null}
+
+        {c.status === "error" && !error ? (
+          <p className="rounded-md border border-poster/30 bg-poster-soft/40 px-3 py-2 text-small text-poster-deep">
+            {c.account ? "The connection expired or was revoked. Reconnect to keep plans flowing." : "Could not reach the connection service. Reconnect, or refresh in a moment."}
+          </p>
+        ) : null}
+        {error ? <p data-testid="conn-error" role="alert" className="rounded-md border border-poster/30 bg-poster-soft/40 px-3 py-2 text-small text-poster-deep">{error}</p> : null}
+
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
+          {builtin ? (
+            <Link data-testid="conn-builtin" href="/app" className="group inline-flex items-center gap-1.5 text-small text-ink underline-offset-4 hover:underline">
+              Export from a plan <span aria-hidden className="ws-arrow">→</span>
+            </Link>
+          ) : confirming ? (
+            <>
+              <span className="text-small text-ink">Disconnect {c.name}?</span>
+              <Button size="sm" variant="primary" onClick={onDisconnect} disabled={busy !== null} data-testid="conn-disconnect-confirm">
+                {busy === "disconnect" ? "Disconnecting…" : "Disconnect"}
+              </Button>
+              <Button size="sm" variant="quiet" onClick={() => setConfirming(false)} disabled={busy !== null}>Keep</Button>
+            </>
+          ) : connected || (c.status === "error" && c.account) ? (
+            <>
+              {c.status === "error" ? (
+                <Button size="sm" variant="primary" arrow onClick={onConnect} disabled={busy !== null} data-testid="conn-reconnect">
+                  {busy === "connect" ? `Opening ${c.name}…` : "Reconnect"}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setConfirming(true)} disabled={busy !== null} data-testid="conn-disconnect">Disconnect</Button>
+            </>
+          ) : (
+            <Button size="sm" variant="primary" arrow onClick={onConnect} disabled={busy !== null} data-testid="conn-connect">
+              {busy === "connect" ? `Opening ${c.name}…` : c.status === "error" ? "Try connecting again" : `Connect ${c.name}`}
+            </Button>
+          )}
+        </div>
       </div>
-      <dl className="mt-3 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[8rem_1fr]">
-        <dt className="text-muted">Read-back</dt>
-        <dd data-testid="conn-realtime" data-realtime={c.realtime}>{realtimeLabel[c.realtime] ?? c.realtime}</dd>
-        <dt className="text-muted">Last sync</dt>
-        <dd data-testid="conn-last-sync">{c.lastSyncAt ? when(c.lastSyncAt) : "never"}</dd>
-      </dl>
-      {error && <p data-testid="conn-error" role="alert" className="mt-2 text-sm text-guard">{error}</p>}
-      <details className="mt-3" open={c.events.length > 0 && c.events.length <= 3}>
-        <summary className="cursor-pointer text-sm font-semibold">Event log ({c.events.length})</summary>
-        {c.events.length === 0 ? (
-          <p data-testid="conn-events-empty" className="mt-2 text-sm text-muted">Nothing sent or received yet.</p>
-        ) : (
-          <ol data-testid="conn-events" className="mt-2 divide-y divide-rule text-sm">
-            {c.events.map((e, i) => (
-              <li key={`${e.at}-${i}`} data-testid="conn-event" data-direction={e.direction} className="grid grid-cols-[3rem_1fr] gap-2 py-1.5">
-                <span className="font-mono text-xs uppercase">{e.direction === "out" ? "→ out" : "← in"}</span>
-                <span>
-                  {e.summary}
-                  <span className="block font-mono text-xs text-muted">{when(e.at)}</span>
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </details>
     </li>
   );
 }

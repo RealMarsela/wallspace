@@ -1,11 +1,13 @@
 import type { Brief, CopyLine, Evidence, Face, HeatCell, Pick, Plan, Run, RunStep, Seed } from "@/contract";
-import type { TokenFactory } from "../models";
+import { isModelUnavailable, type TokenFactory } from "../models";
+import { QlooError } from "../qloo/types";
 import { guardStep, guardText } from "../guard";
 import type { BudgetClient } from "../tavily/budget-core";
 import type { Tavily } from "../tavily/client";
 import { eventsFor } from "../tavily/events";
 import { writeCopy } from "./copy";
 import { inspectCandidates } from "./inspect";
+import { skippedCodeStep, skippedStep } from "./outage";
 import { resolveAndMap } from "./planner";
 import type { KvMin, PlanStore, QlooPort, ScoredFace, ScoringPort, StepSink } from "./ports";
 import { ultraReview } from "./review";
@@ -38,7 +40,7 @@ export interface PipelineInput {
 }
 
 interface Candidate extends ScoredFace {
-  topTags: { id: string; name: string; affinity: number; lift?: number | null; synthetic?: boolean }[];
+  topTags: { id: string; name: string; affinity: number; lift?: number | null }[];
 }
 
 export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Promise<{ plan: Plan; run: Run }> {
@@ -58,8 +60,17 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
 
   // 2. embeddings: free text -> Qloo tags
   const embed = await d.step("embed", async () => {
-    const m = await matchSeeds(d.tf, d.kv, d.qloo, [brief.audienceText, ...brief.loves].filter(Boolean));
-    return { seeds: m.seeds, steps: await emitSteps(d.emit, `${runId}:embed`, m.steps) };
+    try {
+      const m = await matchSeeds(d.tf, d.kv, d.qloo, [brief.audienceText, ...brief.loves].filter(Boolean));
+      return { seeds: m.seeds, steps: await emitSteps(d.emit, `${runId}:embed`, m.steps) };
+    } catch (e) {
+      // Without embeddings (or the Qloo vocabulary) there are no tag seeds; the planner still searches each love and maps from those.
+      const skipped = isModelUnavailable(e) ? skippedStep("embed", e, "map the brief to Qloo tags", "embeddings cosine", "No tag seeds from embeddings; the planner searches each love instead.")
+        : e instanceof QlooError ? skippedCodeStep("qloo", "map the brief to Qloo tags", "qloo.tags", `skipped: Qloo tag vocabulary returned ${e.code}${e.status ? `, HTTP ${e.status}` : ""}; no tag seeds, the planner searches each love instead`, e.code)
+        : null;
+      if (!skipped) throw e;
+      return { seeds: [] as Seed[], steps: await emitSteps(d.emit, `${runId}:embed`, [skipped]) };
+    }
   });
   push(embed.steps);
 
@@ -84,10 +95,11 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
   // 5. Super VL chooses site photos to read; a blocked sightline drops the face
   const inspected = await d.step("inspect", async () => {
     const r = await inspectCandidates(d.tf, scored.candidates, d.fetchImpl);
-    return { reads: r.reads, dropped: r.dropped, steps: await emitSteps(d.emit, `${runId}:inspect`, r.steps) };
+    return { reads: r.reads, dropped: r.dropped, unchecked: r.unchecked, steps: await emitSteps(d.emit, `${runId}:inspect`, r.steps) };
   });
   push(inspected.steps);
   const droppedIds = new Set(inspected.dropped.map((x) => x.faceId));
+  const photoSkipRef = inspected.steps.find((s) => s.status === "skipped")?.id ?? "";
   const remaining = scored.candidates.filter((c) => !droppedIds.has(c.face.id));
 
   // 6. what each block over-indexes on
@@ -96,17 +108,24 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
     let allCached = true;
     let tool = "qloo.insights urn:tag + signal.location";
     const out: Candidate[] = [];
+    const skippedBlocks: RunStep[] = [];
     for (const c of remaining) {
-      const r = await d.qloo.blockTags(c.face, mapped.seeds);
+      let r;
+      try {
+        r = await d.qloo.blockTags(c.face, mapped.seeds);
+      } catch (e) {
+        if (!(e instanceof QlooError)) throw e;
+        // One block without Qloo tags is kept without tag evidence; the step says so.
+        skippedBlocks.push(skippedCodeStep("qloo", `what ${c.face.id} over-indexes on`, "qloo.insights urn:tag + signal.location", `skipped: Qloo returned ${e.code}${e.status ? `, HTTP ${e.status}` : ""}; ${c.face.id} is kept with no tag evidence`, e.code));
+        out.push({ ...c, topTags: [] });
+        continue;
+      }
       ms += r.ms;
       allCached = allCached && r.cached;
-      if (!r.data.some((t) => t.synthetic)) tool = r.tool; // name the tool from a real block when there is one
+      tool = r.tool;
       out.push({ ...c, topTags: r.data.slice(0, 5) });
     }
-    // Mixed provenance is stated in the step: blocks without a Qloo recording carry the labelled synthetic fixture.
-    const synth = out.filter((c) => c.topTags.some((t) => t.synthetic)).length;
-    const label = synth ? `${tool.replace(/ \(synthetic fixture\)$/, "")} (${out.length - synth} blocks from Qloo recordings, ${synth} synthetic sample)` : tool;
-    const steps = await emitSteps(d.emit, `${runId}:overindex`, [{ ...codeStep("qloo", "what each block over-indexes on", label, `${out.length} blocks, ${out.reduce((a, c) => a + c.topTags.length, 0)} tags${synth ? `; ${synth} synthetic` : ""}`, ms), cached: allCached }]);
+    const steps = await emitSteps(d.emit, `${runId}:overindex`, [{ ...codeStep("qloo", "what each block over-indexes on", tool, `${out.length} blocks, ${out.reduce((a, c) => a + c.topTags.length, 0)} tags`, ms), cached: allCached }, ...skippedBlocks]);
     return { candidates: out, steps };
   });
   push(indexed.steps);
@@ -125,13 +144,15 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
   const neighbourhoods = [...new Set(pickCands.map((c) => c.face.neighbourhood))];
   const events = await d.step("events", async () => {
     const byHood: Record<string, { title: string; date: string; distanceM: number | null; url: string }[]> = {};
+    const unchecked: string[] = []; // neighbourhoods whose events were not searched or whose search failed
     const steps: RunStep[] = [];
     for (const n of neighbourhoods) {
       const r = await eventsFor({ tavily: d.tavily, tf: d.tf, kv: d.kv, budget: d.budget, sessionId: d.sessionId, bucket: d.bucket }, n, { start: brief.flightStart, weeks: brief.flightWeeks });
       byHood[n] = r.events;
+      if (r.note) unchecked.push(n);
       steps.push(...r.steps);
     }
-    return { byHood, steps: await emitSteps(d.emit, `${runId}:events`, steps) };
+    return { byHood, unchecked, steps: await emitSteps(d.emit, `${runId}:events`, steps) };
   });
   push(events.steps);
   const eventRef = (n: string) => events.steps.find((s) => s.role === "tavily" && s.title.endsWith(n))?.id ?? events.steps[0]?.id ?? "";
@@ -146,14 +167,14 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
         const why = r.lines.flatMap((l) => l.guard.reasons).join(" ");
         const again = await writeCopy(d.tf, { ...input, redraftNote: `the guard refused a line: ${why}` });
         steps.push(...again.steps);
-        r = { steps, lines: again.lines.map((l, i) => (l.guard.status === "pass" && r.lines[i].guard.status !== "pass" ? ({ ...l, guard: { ...l.guard, status: "rewritten" as const, reasons: r.lines[i].guard.reasons } }) : l)) };
+        r = { steps, needsHuman: again.needsHuman, lines: again.lines.map((l, i) => (l.guard.status === "pass" && r.lines[i]?.guard.status !== "pass" && r.lines[i] ? ({ ...l, guard: { ...l.guard, status: "rewritten" as const, reasons: r.lines[i].guard.reasons } }) : l)) };
       }
-      return { faceId: c.face.id, lines: r.lines, steps };
+      return { faceId: c.face.id, lines: r.lines, steps, human: r.needsHuman };
     });
     const flat = results.flatMap((r) => r.steps.map((s) => ({ ...s, summary: s.summary || r.faceId })));
     const checks = results.reduce((a, r) => a + r.lines.length, 0);
     const stepsOut = await emitSteps(d.emit, `${runId}:copy`, [...flat, codeStep("live-guard", "guard checks every copy line", "live-guard", `${checks} lines checked, ${results.reduce((a, r) => a + r.lines.filter((l) => l.guard.status !== "pass").length, 0)} not passed`)]);
-    return { lines: Object.fromEntries(results.map((r) => [r.faceId, r.lines])) as Record<string, CopyLine[]>, steps: stepsOut };
+    return { lines: Object.fromEntries(results.map((r) => [r.faceId, r.lines])) as Record<string, CopyLine[]>, human: Object.fromEntries(results.filter((r) => r.human).map((r) => [r.faceId, r.human as string])) as Record<string, string>, steps: stepsOut };
   });
   push(copied.steps);
 
@@ -164,12 +185,14 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
     const ev = events.byHood[c.face.neighbourhood] ?? [];
     const evidence: Evidence[] = [
       { kind: "qloo-heatmap", label: `audience affinity ${c.affinity.toFixed(2)} in this cell`, value: c.affinity, sourceRef: heatStepId },
-      // The label says where the number comes from: a Qloo answer (with its lift against the Atlanta list) or the labelled synthetic fixture.
-      ...c.topTags.slice(0, 3).map((t): Evidence => ({ kind: "qloo-tag", label: `over-indexes on ${t.name}${t.lift ? ` (${t.lift}x vs Atlanta)` : ""}${t.synthetic ? " (synthetic sample)" : ""}`, value: t.affinity, sourceRef: indexed.steps[0]?.id ?? "" })),
+      // The label carries the lift against the Atlanta list.
+      ...c.topTags.slice(0, 3).map((t): Evidence => ({ kind: "qloo-tag", label: `over-indexes on ${t.name}${t.lift ? ` (${t.lift}x vs Atlanta)` : ""}`, value: t.affinity, sourceRef: indexed.steps[0]?.id ?? "" })),
       ...(read ? [{ kind: "photo-read" as const, label: `${read.sightline} sightline, ${read.clutter} clutter`, value: read.faceShareOfFrame, sourceRef: inspected.steps.find((s) => s.summary.startsWith(c.face.id))?.id ?? inspected.steps[0]?.id ?? "" }] : []),
       ...ev.slice(0, 2).map((e): Evidence => ({ kind: "tavily-event", label: `${e.title} (${e.date})`, value: null, sourceRef: eventRef(c.face.neighbourhood) })),
+      ...(!ev.length && events.unchecked.includes(c.face.neighbourhood) ? [{ kind: "tavily-event" as const, label: "no events checked", value: null, sourceRef: eventRef(c.face.neighbourhood) }] : []),
+      ...(inspected.unchecked.includes(c.face.id) ? [{ kind: "photo-read" as const, label: "photo not checked", value: null, sourceRef: photoSkipRef }] : []),
     ];
-    return { faceId: c.face.id, rank: i + 1, affinity: c.affinity, score: c.score, costUsd: split.costs[c.face.id] ?? 0, topTags: c.topTags.map((t) => t.name), evidence, photoRead: read, events: ev, copy: copied.lines[c.face.id] ?? [], chosenCopy: 0, review: { status: "ok", note: null }, tasteShifted: false };
+    return { faceId: c.face.id, rank: i + 1, affinity: c.affinity, score: c.score, costUsd: split.costs[c.face.id] ?? 0, topTags: c.topTags.map((t) => t.name), evidence, photoRead: read, events: ev, copy: copied.lines[c.face.id] ?? [], chosenCopy: 0, review: copied.human[c.face.id] ? { status: "flagged", note: copied.human[c.face.id] } : { status: "ok", note: null }, tasteShifted: false };
   });
   const base: Plan = {
     id: planId, briefId: brief.id, runId, status: "running", picks, scoredCount: scored.scoredCount, droppedCount: scored.noEvidence + inspected.dropped.length,
@@ -178,15 +201,23 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
 
   // 10. Ultra reviews the whole plan once; flagged faces are redrafted by Lightning
   const reviewed = await d.step("review", async () => {
-    const r = await ultraReview(d.tf, brief, base, d.faces);
+    let r;
+    try {
+      r = await ultraReview(d.tf, brief, base, d.faces);
+    } catch (e) {
+      if (!isModelUnavailable(e)) throw e;
+      // The review is advisory: the plan ships "not reviewed" and the step says why.
+      return { flags: [], flagged: [] as string[], skipped: true, steps: await emitSteps(d.emit, `${runId}:review`, [skippedStep("ultra", e, "review the whole plan", "review", "The plan ships not reviewed.")]) };
+    }
     const flagged = [...new Set(r.out.flags.filter((f) => f.issue !== "budget").map((f) => f.faceId))].filter((id) => base.picks.some((p) => p.faceId === id));
     const steps = r.steps.map((s) => ({ ...s, summary: `${r.out.flags.length} flag(s)${r.out.flags.length ? `: ${r.out.flags.map((f) => `${f.faceId} ${f.issue}`).join(", ")}` : ""}. Budget: ${r.out.budgetNote}` }));
-    return { flags: r.out.flags, flagged, steps: await emitSteps(d.emit, `${runId}:review`, steps) };
+    return { flags: r.out.flags, flagged, skipped: false, steps: await emitSteps(d.emit, `${runId}:review`, steps) };
   });
   push(reviewed.steps);
 
   const redrafted = await d.step("redraft", async () => {
     const out: Record<string, CopyLine[]> = {};
+    const human: Record<string, string> = {};
     const steps: RunStep[] = [];
     for (const id of reviewed.flagged) {
       const p = base.picks.find((x) => x.faceId === id) as Pick;
@@ -194,10 +225,11 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
       const notes = reviewed.flags.filter((f) => f.faceId === id).map((f) => `${f.issue}: ${f.note}`).join(" ");
       const near = base.picks.filter((o) => o.faceId !== id).map((o) => o.copy[o.chosenCopy]?.text).filter((t): t is string => !!t);
       const r = await writeCopy(d.tf, { brief, face, topTags: p.topTags, events: p.events, redraftNote: notes, avoid: near });
-      out[id] = r.lines;
+      if (r.needsHuman) human[id] = r.needsHuman; // the earlier lines stay: a redraft that fails the check never replaces them
+      else out[id] = r.lines;
       steps.push(...r.steps);
     }
-    return { lines: out, steps: await emitSteps(d.emit, `${runId}:redraft`, steps) };
+    return { lines: out, human, steps: await emitSteps(d.emit, `${runId}:redraft`, steps) };
   });
   push(redrafted.steps);
 
@@ -206,6 +238,9 @@ export async function runPlanPipeline(d: PipelineDeps, input: PipelineInput): Pr
     status: "ready",
     picks: base.picks.map((p) => {
       const fresh = redrafted.lines[p.faceId];
+      const stuck = redrafted.human[p.faceId];
+      if (reviewed.skipped && p.review.status === "ok") return { ...p, review: { status: "ok" as const, note: "Not reviewed: the review model was unavailable." } };
+      if (stuck) return { ...p, review: { status: "flagged" as const, note: [reviewed.flags.filter((f) => f.faceId === p.faceId).map((f) => `${f.issue}: ${f.note}`).join(" "), stuck].filter(Boolean).join(" ") } };
       if (!fresh) return p;
       const note = reviewed.flags.filter((f) => f.faceId === p.faceId).map((f) => `${f.issue}: ${f.note}`).join(" ");
       return { ...p, copy: fresh, chosenCopy: 0, review: { status: fresh.some((l) => l.guard.status === "blocked") ? ("flagged" as const) : ("redrafted" as const), note } };

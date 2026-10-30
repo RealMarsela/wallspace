@@ -45,7 +45,7 @@ export function ProofCards() {
               Lines written for the <Em>block</Em> they stand on.
             </>
           }
-          lede="Each line below is the one the sample plan runs on that face, written by Nemotron Lightning and signed off by NeMo Guardrails."
+          lede="Each line below is the one the sample plan runs on that face, written by Nemotron 3.5 Lightning and signed off by NeMo Guardrails."
         />
         <InView className="mt-12 grid gap-4 md:grid-cols-3">
           {(picks ?? [null, null, null]).map((r, i) => (

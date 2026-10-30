@@ -56,3 +56,26 @@ export function kindMix(rows: PickRow[]): string {
 
 /** Brand name without the "(sample brand)" suffix; the stamp says it instead. */
 export const brandTitle = (name: string) => name.replace(/\s*\(sample brand\)\s*$/i, "");
+
+export interface PickChecks {
+  nemo: boolean;
+  vision: boolean;
+  redrafted: boolean;
+}
+
+/** Status chips for one pick: the chosen line passed NeMo, its site photo was read by Super VL, Ultra sent it back for a redraft. */
+export function pickChecks(pick: Pick, run: Run | null): PickChecks {
+  const chosen = pick.copy[pick.chosenCopy] ?? pick.copy[0];
+  const read = run?.steps.some((s) => s.status === "ok" && /site photo/i.test(s.title) && s.title.includes(pick.faceId)) ?? false;
+  return { nemo: chosen?.nemo?.status === "pass", vision: Boolean(pick.photoRead) || read, redrafted: pick.review.status === "redrafted" };
+}
+
+/** Faces Super VL looked at and then dropped (read in the run, absent from the picks). */
+export function visionDrops(run: Run | null, picks: Pick[]): string[] {
+  if (!run) return [];
+  const picked = new Set(picks.map((p) => p.faceId));
+  return run.steps
+    .filter((s) => s.status === "ok" && /read the site photo/i.test(s.title))
+    .map((s) => /ATL-\d+/.exec(s.title)?.[0])
+    .filter((id): id is string => Boolean(id) && !picked.has(id as string));
+}

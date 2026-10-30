@@ -5,6 +5,7 @@ import { Eye, Shield } from "@/components/ui/icons";
 import { useSample } from "../data";
 import { pickRows, runSummary, signOff } from "../derive";
 import { MediaFrame, MediaLoading } from "./MediaFrame";
+import { statusLabel } from "@/lib/status-labels";
 
 /** The Ultra review note from the run log, the line it sent back, and the NeMo sign-off count with its job ID. */
 export function ReviewMedia() {
@@ -17,11 +18,11 @@ export function ReviewMedia() {
   const sentBack = pickRows(plan).find((r) => r.review.status !== "ok");
   const pct = so.lines ? so.nemoPassed / so.lines : 0;
   return (
-    <MediaFrame title="Review and sign-off" meta={so.status === "nemo-checked" ? "signed off" : so.status}>
+    <MediaFrame title="Review and sign-off" meta={statusLabel(so.status)}>
       <div className="flex h-full flex-col gap-3 p-4">
         <div className="ws-fade-up rounded-md border border-line bg-paper p-3" style={{ "--delay": "200ms" } as CSSProperties}>
           <p className="flex items-center gap-2 text-micro text-muted">
-            <Eye size={14} /> Nemotron Ultra · one pass over the plan
+            <Eye size={14} /> Nemotron 3 Ultra 550B · one pass over the plan
           </p>
           <p className="mt-1.5 line-clamp-2 text-small">{summary?.review ?? "Review note loading."}</p>
         </div>
@@ -29,7 +30,7 @@ export function ReviewMedia() {
           <div className="ws-fade-up rounded-md border border-line bg-paper p-3" style={{ "--delay": "650ms" } as CSSProperties}>
             <p className="flex items-center justify-between gap-2 text-micro text-muted">
               <span>Sent back · {sentBack.faceId}</span>
-              <Badge status="warn">{sentBack.review.status}</Badge>
+              <Badge status="warn">{statusLabel(sentBack.review.status)}</Badge>
             </p>
             {sentBack.review.note ? <p className="mt-1.5 line-clamp-1 text-micro text-muted">{sentBack.review.note}</p> : null}
             <p className="mt-1.5 text-small">Now runs: &ldquo;{sentBack.line}&rdquo;</p>

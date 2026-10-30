@@ -1,14 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { HeatCell } from "@/contract";
 import { MemoryStore } from "../db";
 import type { KvLike } from "../db/bindings";
 import { QlooClient, newLocalMeter } from "./client";
-import { brandsByPlace, entities, heatmap, tagsByPlace, search } from "./endpoints";
-import { buildAudienceCard } from "./card";
+import { tagsByPlace, search } from "./endpoints";
 import { decodeGeohash, encodeGeohash } from "./geohash";
 import { normalizeRequest, requestKey } from "./request-key";
-import { MemoryReplay } from "./replay";
-import { syntheticRecordings, syntheticReplay } from "./synthetic";
 import { QlooError } from "./types";
 
 const kv = (): KvLike & { data: Map<string, string> } => {
@@ -17,7 +13,7 @@ const kv = (): KvLike & { data: Map<string, string> } => {
 };
 const tagBody = { success: true, results: { tags: [{ tag_id: "urn:tag:x", name: "X", query: { affinity: 0.5 } }] } };
 const okFetch = (body: unknown = tagBody) => vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
-const live = (over: Partial<ConstructorParameters<typeof QlooClient>[0]> = {}) => new QlooClient({ mode: "live", apiKey: "test-key", localMeter: newLocalMeter(), ...over });
+const live = (over: Partial<ConstructorParameters<typeof QlooClient>[0]> = {}) => new QlooClient({ apiKey: "test-key", localMeter: newLocalMeter(), ...over });
 
 describe("request keys", () => {
   it("ignore parameter order, blanks and undefined, and never include a key", async () => {
@@ -35,35 +31,6 @@ describe("geohash", () => {
     const c = decodeGeohash(h);
     expect(Math.abs(c.lat - 33.7648)).toBeLessThan(0.004);
     expect(Math.abs(c.lng - -84.3489)).toBeLessThan(0.007);
-  });
-});
-
-describe("replay mode", () => {
-  it("answers from synthetic recordings, never calls fetch, and flags them", async () => {
-    const f = okFetch();
-    const store = new MemoryStore();
-    const c = new QlooClient({ mode: "replay", replay: await syntheticReplay(), store, fetchImpl: f as never });
-    const r = await tagsByPlace(c, 33.7648, -84.3489);
-    expect(f).not.toHaveBeenCalled();
-    expect(r.data.length).toBeGreaterThan(5);
-    expect(r.source).toMatchObject({ mode: "replay", recorded: true, synthetic: true, exact: false });
-    const ledger = await store.listLedger({ provider: "qloo" });
-    expect(ledger[0]).toMatchObject({ mode: "replay", cached: true, status: "ok" });
-  });
-  it("prefers an exact recording over the default", async () => {
-    const custom = { kind: "tags-by-place", endpoint: "/v2/insights", params: { "filter.type": "urn:tag", "signal.location": "POINT(-84.3 33.7)", take: 50 }, response: { results: { tags: [{ name: "Exact", query: { affinity: 1 } }] } } };
-    const c = new QlooClient({ mode: "replay", replay: await MemoryReplay.from([custom, ...syntheticRecordings]) });
-    expect((await tagsByPlace(c, 33.7, -84.3)).data[0].name).toBe("Exact");
-    expect((await tagsByPlace(c, 33.7, -84.3)).source.exact).toBe(true);
-  });
-  it("fails clearly with no recording", async () => {
-    const c = new QlooClient({ mode: "replay", replay: await MemoryReplay.from([]) });
-    await expect(search(c, "x")).rejects.toMatchObject({ code: "no_recording" });
-  });
-  it("rejects a recording in an unexpected shape", async () => {
-    const bad = { kind: "tags-by-place", endpoint: "/v2/insights", params: {}, response: { nope: 1 }, default: true };
-    const c = new QlooClient({ mode: "replay", replay: await MemoryReplay.from([bad]) });
-    await expect(tagsByPlace(c, 1, 1)).rejects.toMatchObject({ code: "shape" });
   });
 });
 
@@ -108,32 +75,39 @@ describe("live mode", () => {
     expect(cache.data.size).toBe(0);
   });
   it("needs a key", async () => {
-    const c = new QlooClient({ mode: "live" });
+    const c = new QlooClient({});
     await expect(search(c, "x")).rejects.toBeInstanceOf(QlooError);
   });
 });
 
-describe("endpoints over the synthetic set", () => {
-  it("heatmap returns contract HeatCells in 0..1", async () => {
-    const c = new QlooClient({ mode: "replay", replay: await syntheticReplay() });
-    const { data } = await heatmap(c, { tagIds: ["urn:tag:genre:media:comedy"] });
-    expect(data.length).toBeGreaterThan(50);
-    for (const cell of data) { expect(HeatCell.safeParse(cell).success).toBe(true); }
-    const best = data.reduce((a, b) => (b.affinity > a.affinity ? b : a));
-    expect(best.lat).toBeGreaterThan(33.75);
-    expect(best.lat).toBeLessThan(33.78);
+
+describe("live answers", () => {
+  it("reports the Qloo request id for a live call and none for a KV copy", async () => {
+    const cache = kv();
+    const f = vi.fn(async () => new Response(JSON.stringify(tagBody), { status: 200, headers: { "x-qloo-request-id": "9f1c-0001" } }));
+    const c = live({ kv: cache, fetchImpl: f as never });
+    const first = await tagsByPlace(c, 33.77, -84.36);
+    const second = await tagsByPlace(c, 33.77, -84.36);
+    expect(first.source).toMatchObject({ mode: "live", cached: false, requestId: "9f1c-0001" });
+    expect(second.source).toMatchObject({ cached: true, requestId: null });
+    expect(f).toHaveBeenCalledTimes(1);
   });
-  it("brands and entities normalise ids and names", async () => {
-    const c = new QlooClient({ mode: "replay", replay: await syntheticReplay() });
-    expect((await brandsByPlace(c, 33.76, -84.35)).data[0]).toMatchObject({ id: expect.stringContaining("SYNTH"), name: expect.stringContaining("synthetic") });
-    expect((await entities(c, ["SYNTH-ENT-0001"])).data[0].id).toBe("SYNTH-ENT-0001");
+  it("keeps live answers in KV for at least a week", async () => {
+    const puts: { ttl?: number }[] = [];
+    const cache = { get: async () => null, put: async (_k: string, _v: string, o?: { expirationTtl?: number }) => void puts.push({ ttl: o?.expirationTtl }), delete: async () => undefined };
+    await tagsByPlace(live({ kv: cache as never, fetchImpl: okFetch() as never }), 33.77, -84.36);
+    expect(puts[0].ttl).toBeGreaterThanOrEqual(7 * 86400);
   });
-  it("builds an audience card ranked by score, labelled synthetic through source", async () => {
-    const c = new QlooClient({ mode: "replay", replay: await syntheticReplay() });
-    const { card, source } = await buildAudienceCard(c, { id: "ATL-0101", lat: 33.7648, lng: -84.3489 }, new Date("2026-10-30T08:00:00Z"));
-    expect(card.faceId).toBe("ATL-0101");
-    expect(card.topTags[0].score).toBeGreaterThanOrEqual(card.topTags[1].score);
-    expect(card.brands.length).toBeGreaterThan(2);
-    expect(source.every((s) => s.synthetic)).toBe(true);
+  it("ignores an unreadable KV copy and calls Qloo", async () => {
+    const f = okFetch();
+    const cache = { get: async () => JSON.stringify({ not: "a qloo body" }), put: async () => undefined, delete: async () => undefined };
+    expect((await tagsByPlace(live({ kv: cache as never, fetchImpl: f as never }), 33.77, -84.36)).source.cached).toBe(false);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it("never returns data when Qloo fails: a 500 and a timeout both throw", async () => {
+    const c = live({ fetchImpl: vi.fn(async () => new Response("down", { status: 500 })) as never });
+    await expect(tagsByPlace(c, 1, 2)).rejects.toMatchObject({ code: "http", status: 500 });
+    const t = live({ fetchImpl: vi.fn(async () => { throw new DOMException("timed out", "TimeoutError"); }) as never });
+    await expect(tagsByPlace(t, 1, 2)).rejects.toMatchObject({ code: "network" });
   });
 });

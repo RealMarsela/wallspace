@@ -150,6 +150,7 @@ export const RunStep = z.object({
   requestId: z.string().nullable(), // provider request id, for the Nebius feedback field
   cached: z.boolean(),
   status: z.enum(["ok", "error", "skipped"]),
+  errorCode: z.string().nullish(), // set on a skipped or failed step: "model_unavailable", a Qloo or Tavily code
 });
 export type RunStep = z.infer<typeof RunStep>;
 
@@ -169,7 +170,7 @@ export type Run = z.infer<typeof Run>;
 export const AudienceCard = z.object({
   faceId: z.string(),
   // score is 0..1. lift (optional): how many times higher the tag ranks around this face than across the city (Qloo rank vs the city
-  // list); absent when there is no city baseline or the answer is synthetic. Taste only: identity-style tags never appear here.
+  // list); absent when the Atlanta baseline call failed. Taste only: identity-style tags never appear here.
   topTags: z.array(z.object({ name: z.string(), score: z.number(), lift: z.number().nullish() })),
   brands: z.array(z.object({ name: z.string(), qlooId: z.string(), score: z.number() })),
   generatedAt: z.string(),

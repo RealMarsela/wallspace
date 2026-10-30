@@ -66,9 +66,14 @@ export interface ReplayStore {
   put?(key: string, value: RecordedResponse): Promise<void>;
 }
 
+// 404 or a model_not_found body: the model is gone for now (it was missing for a few hours on 30 Oct). Callers skip or degrade; they never swap models.
+export const MODEL_UNAVAILABLE = "model_unavailable";
+
 export class TfError extends Error {
   constructor(message: string, readonly code: string, readonly status?: number) {
     super(message);
     this.name = "TfError";
   }
 }
+
+export const isModelUnavailable = (e: unknown): e is TfError => e instanceof TfError && e.code === MODEL_UNAVAILABLE;

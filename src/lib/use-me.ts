@@ -21,7 +21,12 @@ export function useMe(): MeState & { reload: () => void } {
     };
   }, [tick]);
   useEffect(() => {
-    const on = () => setTick((n) => n + 1);
+    const on = (e: Event) => {
+      const fresh = (e as CustomEvent<MeResponse | undefined>).detail;
+      // A handed-over answer shows at once; the tick still cancels any older in-flight fetch (it re-reads the cache).
+      if (fresh) setState({ status: "ready", me: fresh });
+      setTick((n) => n + 1);
+    };
     window.addEventListener(AUTH_EVENT, on);
     return () => window.removeEventListener(AUTH_EVENT, on);
   }, []);

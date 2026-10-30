@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RunStep } from "@/contract";
 import { LocalEvent } from "@/contract";
 import type { KvMin } from "../agent/ports";
-import { chatJson, type TokenFactory } from "../models";
+import { chatJson, isModelUnavailable, type TokenFactory } from "../models";
 import type { BudgetClient } from "./budget-core";
 import { TavilyError, type Tavily } from "./client";
 
@@ -48,7 +48,7 @@ interface Cached {
   at: string;
 }
 
-const tavilyStep = (neighbourhood: string, summary: string, ms: number, cached: boolean, requestId: string | null, status: RunStep["status"] = "ok"): RunStep => ({
+const tavilyStep = (neighbourhood: string, summary: string, ms: number, cached: boolean, requestId: string | null, status: RunStep["status"] = "ok", errorCode: string | null = null): RunStep => ({
   id: `tavily-${slug(neighbourhood)}`,
   at: new Date().toISOString(),
   role: "tavily",
@@ -63,6 +63,7 @@ const tavilyStep = (neighbourhood: string, summary: string, ms: number, cached: 
   requestId,
   cached,
   status,
+  errorCode,
 });
 
 // Events during the flight for one neighbourhood: KV first, live Tavily only inside the budget, Lightning keeps real dated nearby events.
@@ -74,11 +75,11 @@ export async function eventsFor(d: EventsDeps, neighbourhood: string, flight: Fl
     const kept = c.events.filter((e) => e.date >= flight.start && e.date <= windowEnd(flight));
     return { events: kept, found: c.found, kept: kept.length, fromCache: true, note: null, steps: [tavilyStep(neighbourhood, `cached ${c.at.slice(0, 10)}: found ${c.found}, kept ${kept.length}`, 0, true, null)] };
   }
-  const skip = (note: string): EventsResult => ({ events: [], found: 0, kept: 0, fromCache: false, note, steps: [tavilyStep(neighbourhood, note, 0, false, null, "skipped")] });
-  if (!d.tavily || !d.tf) return skip("events not searched: Tavily is not configured");
+  const skip = (note: string, code: string | null = "not_searched"): EventsResult => ({ events: [], found: 0, kept: 0, fromCache: false, note, steps: [tavilyStep(neighbourhood, note, 0, false, null, "skipped", code)] });
+  if (!d.tavily || !d.tf) return skip("no events checked: Tavily is not configured");
   if (d.budget) {
     const r = await d.budget.reserve(d.sessionId, 2, d.bucket);
-    if (!r.ok) return skip(`events not searched (${r.reason.replace("_", " ")}); using saved events only`);
+    if (!r.ok) return skip(`no events checked (${r.reason.replace("_", " ")}); using saved events only`);
   }
   const month = new Date(flight.start).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
   const steps: RunStep[] = [];
@@ -111,6 +112,10 @@ export async function eventsFor(d: EventsDeps, neighbourhood: string, flight: Fl
     return { events, found: tri.value.events.length, kept: events.length, fromCache: false, note: null, steps: [ts, ...tri.steps] };
   } catch (e) {
     if (d.budget && e instanceof TavilyError) await d.budget.refund(d.sessionId, 2);
-    return { ...skip(`events search failed (${e instanceof Error ? e.message : "error"})`), steps: [...steps, tavilyStep(neighbourhood, `events search failed (${e instanceof Error ? e.message.slice(0, 80) : "error"}); plan continues without events`, 0, false, null, "error")] };
+    // Tavily down, or the triage model gone: no events for this neighbourhood, the plan goes on, the step says so.
+    const code = (e as { code?: string }).code ?? "error";
+    const why = isModelUnavailable(e) ? `skipped (model unavailable): triage model returned ${code}` : `search failed (${code}: ${e instanceof Error ? e.message.slice(0, 80) : "error"})`;
+    const note = `no events checked: ${why}; the plan continues without events`;
+    return { events: [], found: 0, kept: 0, fromCache: false, note, steps: [...steps, tavilyStep(neighbourhood, note, 0, false, null, "skipped", code)] };
   }
 }

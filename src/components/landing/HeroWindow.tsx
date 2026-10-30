@@ -10,6 +10,7 @@ import { flightRange, kindName, usd } from "@/components/ui/format";
 import { faceHref, SAMPLE_PLAN_ID } from "@/lib/routes";
 import { useSample } from "./data";
 import { pickRows } from "./derive";
+import { PLAN_STATUS_LABEL } from "@/lib/status-labels";
 
 export const LIFT_INKS: Ink[] = ["signal", "lilac", "park", "cobalt", "poster"];
 const ROW_H = "h-[54px]";
@@ -63,7 +64,7 @@ export function HeroWindow() {
                     {data.plan.picks.length} of {data.plan.scoredCount} faces
                   </Tag>
                 </span>
-                {data.plan.status === "nemo-checked" ? <Badge status="ok">NeMo checked</Badge> : <Badge status="info">{data.plan.status}</Badge>}
+                <Badge status={data.plan.status === "nemo-checked" ? "ok" : "info"}>{PLAN_STATUS_LABEL[data.plan.status]}</Badge>
               </div>
             ) : (
               <Skeleton className="h-6 w-72" />
@@ -98,9 +99,9 @@ export function HeroWindow() {
                     <td className="px-3">
                       <span className="flex gap-1">
                         {r.lifts.slice(0, 2).map((l, j) => (
-                          <Tag key={l.tag} ink={LIFT_INKS[(i + j) % LIFT_INKS.length]} title={l.synthetic ? "Synthetic sample tag" : `${l.lift ?? ""} vs Atlanta`}>
+                          <Tag key={l.tag} ink={LIFT_INKS[(i + j) % LIFT_INKS.length]} title={`${l.lift ?? ""} vs Atlanta`}>
                             {l.tag}
-                            {l.lift ? <b className="font-mono font-medium">{l.lift}</b> : l.synthetic ? <SampleStamp className="!border-0 !px-0">s</SampleStamp> : null}
+                            {l.lift ? <b className="font-mono font-medium">{l.lift}</b> : null}
                           </Tag>
                         ))}
                       </span>

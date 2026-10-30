@@ -1,7 +1,7 @@
 import type { RunStep } from "@/contract";
 import { MODELS, costUsd, reasoningFields, type TfRole } from "./roles";
 import { requestKey } from "./replay";
-import { TfError, type ChatOptions, type ChatResult, type RecordedResponse, type ReplayStore, type TfEnv, type TfMode, type ToolCall } from "./types";
+import { MODEL_UNAVAILABLE, TfError, type ChatOptions, type ChatResult, type RecordedResponse, type ReplayStore, type TfEnv, type TfMode, type ToolCall } from "./types";
 
 const DEFAULT_BASE = "https://api.tokenfactory.nebius.com/v1/";
 
@@ -79,7 +79,8 @@ export class TokenFactory {
           await this.opts.store?.put?.(key, rec);
           return { ...rec, cached: false };
         }
-        lastErr = new TfError(`Token Factory ${res.status}`, res.status === 429 ? "rate_limited" : "upstream", res.status);
+        const gone = res.status === 404 || /model_not_found|model_not_available/i.test(JSON.stringify((parsed as { error?: unknown } | null)?.error ?? "").slice(0, 400));
+        lastErr = new TfError(`Token Factory ${res.status}`, gone ? MODEL_UNAVAILABLE : res.status === 429 ? "rate_limited" : "upstream", res.status);
         if (res.status !== 429 && res.status < 500) throw lastErr;
         const wait = Number(res.headers.get("retry-after")) * 1000 || 800;
         await (this.opts.sleep ?? ((n) => new Promise((r) => setTimeout(r, n))))(Math.min(wait, 4000));

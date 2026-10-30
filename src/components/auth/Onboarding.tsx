@@ -1,25 +1,35 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { BriefsResponse, type Brief, type MeResponse, type WorkspaceRole } from "@/contract";
 import { fetchMe, notifyAuthChanged, sendJson } from "@/lib/auth-client";
+import { BuyerFirst, DoneStep, OwnerFirst } from "@/app/app/onboarding/FinishSteps";
+import { StepRail } from "@/app/app/onboarding/StepRail";
+import { ToolsStep } from "@/app/app/onboarding/ToolsStep";
+import { WorkspaceStep, WorkspaceSummary } from "@/app/app/onboarding/WorkspaceStep";
+import { PageFrame, PageHeader } from "@/components/shell/PageHeader";
+import { Button, LinkButton } from "@/components/ui/Button";
+import { Alert, ArrowLeft } from "@/components/ui/icons";
+import { Em } from "@/components/ui/SectionHeading";
+import { Skeleton } from "@/components/ui/States";
 
-const field = "block w-full rounded border border-rule bg-panel px-3 py-2";
-const primary = "rounded border border-rule bg-ink px-4 py-2 text-ground disabled:opacity-50";
-const secondary = "rounded border border-rule bg-panel px-4 py-2";
+const ORDER = ["workspace", "tools", "first", "done"] as const;
+const FORM = "onboarding-workspace";
 
-/** Plain four-step onboarding: workspace, tools (skippable), first brief or faces, done. Designed later. */
+/** Four-step onboarding: workspace, tools (skippable), first brief or faces, done. The API moves forward only, so Back
+ *  opens a finished step for review; Next on the current step is the one that saves. */
 export function Onboarding() {
   const [me, setMe] = useState<MeResponse | null>(null);
   const [role, setRole] = useState<WorkspaceRole>("buyer");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [briefs, setBriefs] = useState<Brief[]>([]);
+  const [view, setView] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
-    setMe(await fetchMe(true));
-    notifyAuthChanged();
+    const fresh = await fetchMe(true);
+    setMe(fresh);
+    notifyAuthChanged(fresh);
   }, []);
   useEffect(() => {
     void fetchMe().then(setMe, () => setError("Could not load your account."));
@@ -39,6 +49,7 @@ export function Onboarding() {
     try {
       await fn();
       await refresh();
+      setView(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -46,91 +57,125 @@ export function Onboarding() {
     }
   }
 
-  const createWorkspace = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const name = String(new FormData(e.currentTarget).get("name") ?? "");
-    void run(() => sendJson("POST", "/api/workspaces", { name, role }));
-  };
-  const advance = (step: "first" | "done", skipped: boolean) => void run(() => sendJson("PATCH", "/api/onboarding", { step, skipped }));
+  const createWorkspace = (name: string) => void run(() => sendJson("POST", "/api/workspaces", { name, role }));
+  const advance = (to: "first" | "done", skipped: boolean) => void run(() => sendJson("PATCH", "/api/onboarding", { step: to, skipped }));
 
-  if (!me) return <main className="mx-auto max-w-xl px-4 py-10" data-testid="onboarding-loading">Loading...</main>;
-  if (!me.user) {
+  if (!me)
     return (
-      <main className="mx-auto max-w-xl px-4 py-10" data-testid="onboarding-signed-out">
-        <p>Sign in to set up your workspace.</p>
-        <Link data-testid="onboarding-sign-in" href="/signin?next=/app/onboarding" className="underline">Sign in</Link>
-      </main>
+      <PageFrame testId="onboarding-loading">
+        <div className="flex flex-col gap-3 pb-6 pt-6 lg:pt-14" role="status" aria-label="Loading your setup">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-9 w-full max-w-md" />
+          <Skeleton className="h-5 w-full max-w-xl" />
+        </div>
+        <div className="grid flex-1 gap-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-12">
+          <Skeleton className="h-16 lg:h-[360px]" />
+          <Skeleton className="h-[460px] !rounded-lg" />
+        </div>
+        {error ? <p role="alert" data-testid="onboarding-error" className="mt-4 text-small text-guard">{error}</p> : null}
+      </PageFrame>
     );
-  }
+
+  if (!me.user)
+    return (
+      <PageFrame testId="onboarding-signed-out">
+        <PageHeader eyebrow="Set up" title="Sign in to set up your workspace" lede="Your workspace, tools and first brief are saved to your account." />
+        <div><LinkButton href="/signin?next=/app/onboarding" variant="primary" arrow testId="onboarding-sign-in">Sign in</LinkButton></div>
+      </PageFrame>
+    );
+
+  const current = Math.max(0, ORDER.indexOf(step ?? "workspace"));
+  const viewing = view ?? current;
+  const review = viewing < current;
   const { briefCount } = me.onboarding;
-  const buyer = me.workspace?.role !== "media-owner";
+  const buyer = (me.workspace?.role ?? role) !== "media-owner";
+  const stops = [
+    { id: "workspace", label: "Workspace", hint: "Name and side" },
+    { id: "tools", label: "Tools", hint: "Optional" },
+    { id: "first", label: buyer ? "First brief" : "Your faces", hint: buyer ? "Or skip for now" : "The inventory" },
+    { id: "done", label: "Done", hint: "Into the product" },
+  ];
+  const heads: [string, ReactNode][] = [
+    ["Name your workspace", "Who you are and which side of the street you work. Atlanta is the demo city."],
+    ["Connect your tools", "Optional. Plans and pitches go out through the tools your team already uses."],
+    buyer ? ["Write your first brief", "A brief is all Wallspace needs to pick faces and write copy."] : ["Meet your faces", "Your inventory, with who lives around each face."],
+    ["You are set up", "Pick where to start. Everything here is also in the sidebar."],
+  ];
+  const back = viewing > 0 ? () => setView(viewing - 1) : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-xl space-y-4 px-4 py-10">
-      <h1 className="text-xl font-bold">Set up your workspace</h1>
-      <p data-testid="onboarding-step" data-step={step}>Step: {step}</p>
+    <PageFrame testId="onboarding">
+      <PageHeader
+        eyebrow={<>Set up · Stop {String(viewing + 1).padStart(2, "0")} of 04</>}
+        title={buyer ? <>Four stops to your <Em>first</Em> plan</> : <>Four stops to your <Em>first</Em> pitch</>}
+        lede="About two minutes. You can skip the optional stops and come back from the sidebar."
+      />
+      <p data-testid="onboarding-step" data-step={step} className="sr-only">Step: {step}</p>
+      <div className="grid flex-1 content-start gap-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:content-stretch lg:gap-12">
+        <div className="lg:sticky lg:top-10 lg:self-start lg:pt-2">
+          <StepRail stops={stops} current={step === "done" ? stops.length : current} viewing={viewing} onView={(i) => setView(i === current ? null : i)} />
+        </div>
+        <section aria-labelledby="ob-step-h" data-testid="onboarding-panel" data-viewing={ORDER[viewing]} className="flex min-w-0 flex-col rounded-lg border border-line bg-surface shadow-sm">
+          <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-5 sm:px-8 sm:py-6">
+            <div className="min-w-0">
+              <p className="eyebrow">Stop {String(viewing + 1).padStart(2, "0")} · {stops[viewing].label}</p>
+              <h2 id="ob-step-h" className="mt-2 text-h4 sm:text-[1.625rem] sm:leading-tight">{heads[viewing][0]}</h2>
+              <p className="mt-1.5 text-small text-muted">{heads[viewing][1]}</p>
+            </div>
+            {review ? <span className="rounded-full bg-park-soft px-3 py-1 text-micro text-park-deep" data-testid="onboarding-review">Done · reviewing</span> : null}
+          </header>
 
-      {step === "workspace" ? (
-        <form onSubmit={createWorkspace} className="space-y-3" data-testid="onboarding-workspace-form">
-          <label className="block">
-            Workspace name
-            <input data-testid="onboarding-workspace-name" name="name" required minLength={2} maxLength={80} placeholder="Porchlight Comedy Tour" className={field} />
-          </label>
-          <fieldset className="space-y-1">
-            <legend>I am a</legend>
-            <label className="block"><input type="radio" name="role" data-testid="onboarding-role-buyer" checked={role === "buyer"} onChange={() => setRole("buyer")} /> brand, agency or touring act buying space</label>
-            <label className="block"><input type="radio" name="role" data-testid="onboarding-role-media-owner" checked={role === "media-owner"} onChange={() => setRole("media-owner")} /> media owner with faces to sell</label>
-          </fieldset>
-          <p className="text-ink-2">City: Atlanta</p>
-          <button type="submit" data-testid="onboarding-create-workspace" disabled={busy} className={primary}>Create workspace</button>
-        </form>
-      ) : null}
-
-      {step === "tools" ? (
-        <section className="space-y-3" data-testid="onboarding-tools">
-          <p>Connect the tools you already use (mail, Slack, CRM, sheets, calendar). Optional; you can do it later.</p>
-          <Link data-testid="onboarding-connections-link" href="/app/connections" className="underline">Open connections</Link>
-          <div className="flex gap-2">
-            <button type="button" data-testid="onboarding-tools-continue" disabled={busy} onClick={() => advance("first", false)} className={primary}>Continue</button>
-            <button type="button" data-testid="onboarding-tools-skip" disabled={busy} onClick={() => advance("first", true)} className={secondary}>Skip for now</button>
+          <div key={viewing} className="ws-fade-up flex-1 px-5 py-6 sm:px-8" data-inview="true">
+            {viewing === 0 ? review ? <WorkspaceSummary workspace={me.workspace} /> : <WorkspaceStep role={role} setRole={setRole} onCreate={createWorkspace} formId={FORM} /> : null}
+            {viewing === 1 ? <ToolsStep /> : null}
+            {viewing === 2 ? buyer ? <BuyerFirst briefs={briefs} briefCount={briefCount} /> : <OwnerFirst /> : null}
+            {viewing === 3 ? <DoneStep workspace={me.workspace} buyer={buyer} /> : null}
           </div>
-        </section>
-      ) : null}
 
-      {step === "first" ? (
-        <section className="space-y-3" data-testid="onboarding-first">
-          {buyer ? (
-            <>
-              <p>Write your first brief: who the audience is, what they love, the budget and the flight dates.</p>
-              <Link data-testid="onboarding-brief-link" href="/app/new" className="underline">Create a brief</Link>
-              <p data-testid="onboarding-brief-count">Briefs so far: {briefCount}</p>
-              <ul data-testid="onboarding-brief-list">
-                {briefs.map((b) => (
-                  <li key={b.id} data-testid="onboarding-brief-item">{b.brandName}</li>
-                ))}
-              </ul>
-            </>
-          ) : (
-            <>
-              <p>See the faces on offer and the audience around each one.</p>
-              <Link data-testid="onboarding-faces-link" href="/app/owner" className="underline">View faces</Link>
-            </>
-          )}
-          <div className="flex gap-2">
-            <button type="button" data-testid="onboarding-finish" disabled={busy || (buyer && briefCount === 0)} onClick={() => advance("done", false)} className={primary}>Finish</button>
-            {buyer ? <button type="button" data-testid="onboarding-skip-first" disabled={busy} onClick={() => advance("done", true)} className={secondary}>Skip this step</button> : null}
-          </div>
+          <footer className="flex flex-col gap-3 border-t border-line px-5 py-4 sm:px-8">
+            {error ? (
+              <p role="alert" data-testid="onboarding-error" className="flex items-start gap-2 rounded-md border border-poster/35 bg-poster-soft/40 px-3 py-2 text-small text-poster-deep">
+                <Alert size={16} className="mt-0.5 shrink-0" /> {error}
+              </p>
+            ) : null}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <Button variant="quiet" onClick={back} disabled={!back || busy} data-testid="onboarding-back" className="self-start">
+                <ArrowLeft size={16} /> Back
+              </Button>
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end [&>a]:flex-1 [&>button]:flex-1 sm:[&>a]:flex-none sm:[&>button]:flex-none">
+                <Actions viewing={viewing} review={review} busy={busy} buyer={buyer} briefCount={briefCount} advance={advance} next={() => setView(viewing + 1 === current ? null : viewing + 1)} />
+              </div>
+            </div>
+          </footer>
         </section>
-      ) : null}
-
-      {step === "done" ? (
-        <section className="space-y-3" data-testid="onboarding-done">
-          <p>You are set up. Wallspace is free to use.</p>
-          <Link data-testid="onboarding-done-link" href={buyer ? "/app" : "/app/owner"} className="underline">Go to the product</Link>
-        </section>
-      ) : null}
-
-      {error ? <p role="alert" data-testid="onboarding-error" className="text-guard">{error}</p> : null}
-    </main>
+      </div>
+    </PageFrame>
   );
+}
+
+function Actions({ viewing, review, busy, buyer, briefCount, advance, next }: {
+  viewing: number; review: boolean; busy: boolean; buyer: boolean; briefCount: number;
+  advance: (to: "first" | "done", skipped: boolean) => void; next: () => void;
+}) {
+  if (review) return <Button variant="primary" arrow onClick={next} data-testid="onboarding-next">Next</Button>;
+  if (viewing === 0)
+    return <Button type="submit" form={FORM} variant="primary" arrow disabled={busy} data-testid="onboarding-create-workspace">{busy ? "Creating…" : "Create workspace"}</Button>;
+  if (viewing === 1)
+    return (
+      <>
+        <Button variant="ghost" disabled={busy} onClick={() => advance("first", true)} data-testid="onboarding-tools-skip">Skip for now</Button>
+        <Button variant="primary" arrow disabled={busy} onClick={() => advance("first", false)} data-testid="onboarding-tools-continue">{busy ? "Saving…" : "Continue"}</Button>
+      </>
+    );
+  if (viewing === 2) {
+    const locked = buyer && briefCount === 0;
+    return (
+      <>
+        {locked ? <span className="basis-full text-micro text-muted sm:basis-auto" id="ob-finish-hint">Save a brief to finish</span> : null}
+        {buyer ? <Button variant="ghost" disabled={busy} onClick={() => advance("done", true)} data-testid="onboarding-skip-first">Skip this step</Button> : null}
+        <Button variant="primary" arrow disabled={busy || locked} aria-describedby={locked ? "ob-finish-hint" : undefined} onClick={() => advance("done", false)} data-testid="onboarding-finish">{busy ? "Saving…" : "Finish"}</Button>
+      </>
+    );
+  }
+  return <LinkButton href={buyer ? "/app" : "/app/owner"} variant="primary" arrow testId="onboarding-done-link">{buyer ? "Go to your dashboard" : "Open your inventory"}</LinkButton>;
 }

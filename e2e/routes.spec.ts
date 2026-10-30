@@ -47,7 +47,6 @@ test("expired or forged cookie: the guard and the API refuse it", async ({ page,
   await page.goto("/app/new");
   await expect(page).toHaveURL(/\/signin\?next=%2Fapp%2Fnew$/);
   await expect(page.getByTestId("signin-page")).toBeVisible(); // no redirect loop: the form shows
-  await expect(page.getByTestId("auth-indicator")).toHaveAttribute("data-state", "signed-out");
   const briefs = await page.request.get("/api/briefs");
   expect(briefs.status()).toBe(401);
   expect(await briefs.json()).toMatchObject({ code: "unauthorized" });

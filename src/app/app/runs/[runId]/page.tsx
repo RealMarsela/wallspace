@@ -1,12 +1,9 @@
 import { Suspense } from "react";
+import { RunSkeleton } from "@/components/run/RunSkeleton";
 import { RunTrace } from "@/components/run/RunTrace";
 
+export const metadata = { title: "Agent run" };
+
 export default function RunPage({ params }: PageProps<"/app/runs/[runId]">) {
-  return (
-    <Suspense fallback={<div data-testid="run-loading" className="p-6">Loading run…</div>}>
-      {params.then(({ runId }) => (
-        <RunTrace runId={decodeURIComponent(runId)} />
-      ))}
-    </Suspense>
-  );
+  return <Suspense fallback={<RunSkeleton />}>{params.then(({ runId }) => <RunTrace runId={decodeURIComponent(runId)} />)}</Suspense>;
 }

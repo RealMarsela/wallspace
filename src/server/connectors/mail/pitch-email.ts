@@ -11,6 +11,13 @@ const KIND: Record<string, string> = { bulletin: "Bulletin", poster: "Poster", d
 export const pitchPlanId = (faceId: string) => `pitch-${faceId}`;
 export const PRIVACY_LINE = "Aggregate taste by place, no device tracking.";
 
+/** Owner name with one "(sample)" label: sample owner names may already carry it. */
+export function ownerLabel(owner: Pick<MediaOwner, "name" | "sample"> | null | undefined): string {
+  if (!owner) return "Media owner";
+  const base = owner.name.replace(/\s*\(sample\)\s*$/i, "").trim();
+  return owner.sample || base !== owner.name.trim() ? `${base} (sample)` : base;
+}
+
 // Scores arrive 0..1 or as an index; show a whole number either way.
 const pts = (n: number) => String(Math.round(n <= 1 ? n * 100 : n));
 
@@ -21,7 +28,7 @@ export interface Pitch {
 }
 
 export function buildPitch(face: Face, owner: MediaOwner | null, card: AudienceCardBundle["card"], faceUrl: string, note?: string | null): Pitch {
-  const ownerName = owner ? `${owner.name}${owner.sample ? " (sample)" : ""}` : "Media owner";
+  const ownerName = ownerLabel(owner);
   const specs = `${KIND[face.kind] ?? face.kind} ${face.widthFt}×${face.heightFt} ft · reads ${face.readSide}${face.lit ? " · lit" : ""}${face.digital ? " · digital" : ""}`;
   const tags = card.topTags.slice(0, 6);
   const brands = card.brands.slice(0, 6);

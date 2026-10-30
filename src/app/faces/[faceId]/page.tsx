@@ -1,25 +1,25 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { AudienceCardView } from "@/components/owner/AudienceCardView";
-import { PublicPage } from "@/components/site/PublicPage";
-import { Skeleton } from "@/components/ui/States";
+import { PublicFaceCard } from "@/components/owner/PublicFaceCard";
+import { SiteFooter } from "@/components/site/SiteFooter";
+import { SiteNav } from "@/components/site/SiteNav";
 
-export const metadata: Metadata = {
-  title: "Audience card",
-  description: "Who lives around this face, by taste, and which brands to pitch it to.",
-};
-
-async function Card({ params }: { params: Promise<{ faceId: string }> }) {
+export async function generateMetadata({ params }: PageProps<"/faces/[faceId]">): Promise<Metadata> {
   const { faceId } = await params;
-  return <AudienceCardView faceId={decodeURIComponent(faceId)} />;
+  const id = decodeURIComponent(faceId);
+  return {
+    title: `${id} audience card`,
+    description: "Who lives around this Atlanta billboard face, by taste, and which brands' fans over-index there. Aggregate taste by place, never identity.",
+  };
 }
 
-export default function AudienceCardPage({ params }: PageProps<"/faces/[faceId]">) {
+/** Public audience card: the link inside pitch e-mails. Site frame (nav + footer), no app shell, no sign-in. */
+export default async function AudienceCardPage({ params }: PageProps<"/faces/[faceId]">) {
+  const { faceId } = await params;
   return (
-    <PublicPage testId="audience-card-page">
-      <Suspense fallback={<Skeleton className="h-64" />}>
-        <Card params={params} />
-      </Suspense>
-    </PublicPage>
+    <div className="flex min-h-dvh flex-col">
+      <SiteNav />
+      <PublicFaceCard faceId={decodeURIComponent(faceId)} />
+      <SiteFooter cta={false} />
+    </div>
   );
 }

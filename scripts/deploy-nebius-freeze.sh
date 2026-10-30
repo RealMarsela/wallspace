@@ -34,8 +34,9 @@ if [ -z "$NEB_D1" ]; then ( cd "$SNAP" && "$WR" d1 create wallspace-nebius >/dev
 ( cd "$SNAP" && "$WR" d1 export wallspace --remote --output "$SNAP/prod.sql" >/dev/null )
 # wipe the copy (drop every table), then import the export; the copy ends as an exact snapshot, never a merge
 DROPS="$( cd "$SNAP" && "$WR" d1 execute wallspace-nebius --remote --json --command "select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like '_cf_%'" | node -e 'const t=require("fs").readFileSync(0,"utf8");const j=JSON.parse(t.slice(t.indexOf("[")));process.stdout.write(j[0].results.map(r=>`DROP TABLE IF EXISTS "${r.name}";`).join(" "))' )"
-[ -z "$DROPS" ] || ( cd "$SNAP" && "$WR" d1 execute wallspace-nebius --remote --command "PRAGMA foreign_keys=off; $DROPS" >/dev/null )
-( cd "$SNAP" && "$WR" d1 execute wallspace-nebius --remote --file "$SNAP/prod.sql" >/dev/null )
+[ -z "$DROPS" ] || ( cd "$SNAP" && "$WR" d1 execute wallspace-nebius --remote --command "PRAGMA defer_foreign_keys=on; $DROPS" >/dev/null )
+{ echo "PRAGMA defer_foreign_keys=on;"; cat "$SNAP/prod.sql"; } > "$SNAP/prod-fk.sql"
+( cd "$SNAP" && "$WR" d1 execute wallspace-nebius --remote --file "$SNAP/prod-fk.sql" >/dev/null )
 NEB_KV="$(node "$ROOT/scripts/_freeze-kv.mjs" "$PROD_KV" WS_KV_NEBIUS)"
 echo "snapshot: D1 wallspace-nebius ($NEB_D1), KV WS_KV_NEBIUS ($NEB_KV)"
 git archive HEAD | tar -x -C "$BUILD"

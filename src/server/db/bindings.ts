@@ -47,7 +47,7 @@ export interface WallspaceEnv {
   RESCAN?: WorkflowBinding;
   EVAL_RUN?: WorkflowBinding;
   STORE_DRIVER?: string; // d1 | file | memory
-  QLOO_MODE?: string; // replay | live
+  QLOO_MODE?: string; // live (the only mode)
   QLOO_API_KEY?: string;
   QLOO_CAP_TOTAL?: string;
   QLOO_CAP_DAY?: string;

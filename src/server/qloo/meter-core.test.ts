@@ -29,7 +29,7 @@ describe("QlooMeterCore", () => {
     expect((await meter.refund(1)).total).toBe(0);
     expect((await meter.refund(5)).total).toBe(0);
   });
-  it("defaults to 300 total and 60 a day", async () => {
-    expect(await new QlooMeterCore(mem()).status()).toMatchObject({ capTotal: 300, capDay: 60, total: 0 });
+  it("defaults to 6,000 total and 1,500 a day", async () => {
+    expect(await new QlooMeterCore(mem()).status()).toMatchObject({ capTotal: 6000, capDay: 1500, total: 0 });
   });
 });

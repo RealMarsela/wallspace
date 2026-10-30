@@ -2,11 +2,11 @@ import type { z } from "zod";
 import type { Store } from "../db/types";
 import type { DurableNsLike, KvLike } from "../db/bindings";
 import { DEFAULT_CAPS, QlooMeterCore, type MeterResult, type MeterStorage } from "./meter-core";
-import type { ReplaySource } from "./replay";
 import { requestKey } from "./request-key";
 import { ErrorResp, QLOO_BASE, QlooError, type QlooKind, type QlooMode, type QlooParams } from "./types";
 
-const CACHE_TTL_S = 60 * 60 * 24 * 30;
+// KV copies of live answers: 14 days (block taste by place does not move faster; the key has a monthly pool to protect).
+const CACHE_TTL_S = 60 * 60 * 24 * 14;
 class MapStorage implements MeterStorage {
   private readonly data = new Map<string, unknown>();
   async get<T>(k: string) { return this.data.get(k) as T | undefined; }
@@ -18,29 +18,23 @@ const processMeter = new QlooMeterCore(new MapStorage());
 export const newLocalMeter = () => new QlooMeterCore(new MapStorage());
 
 export interface QlooDeps {
-  mode: QlooMode;
   apiKey?: string;
   kv?: KvLike;
   meter?: DurableNsLike; // QLOO_METER
   localMeter?: QlooMeterCore; // used when no Durable Object is bound; defaults to one per process
   caps?: { total: number; day: number };
   store?: Store; // ledger rows go here
-  replay?: ReplaySource;
   fetchImpl?: typeof fetch;
   now?: () => number;
   base?: string;
   context?: { planId?: string; runId?: string };
-  /** Replay only: called for every request that had no exact recording (a default recording answered, or nothing did). Used by the recording scripts. */
-  onMiss?: (m: { kind: QlooKind; endpoint: string; params: QlooParams }) => void;
 }
 
-/** How an answer was produced: shown on the audience card and in run steps. */
+/** How an answer was produced: shown in run steps. */
 export interface QlooSource {
   mode: QlooMode;
-  cached: boolean; // KV cache hit or a recording: no live call was made for this answer
-  recorded: boolean; // came from replay
-  exact: boolean; // replay: the recording for this very request; false means the default recording for its kind
-  synthetic: boolean;
+  cached: boolean; // true: a KV copy of an earlier live answer, no Qloo call was made now
+  requestId: string | null; // x-qloo-request-id of the live call; null for a KV copy
   key: string;
   ms: number;
 }
@@ -49,14 +43,14 @@ export interface QlooResult<T> { data: T; source: QlooSource }
 export class QlooClient {
   constructor(private readonly d: QlooDeps) {}
 
-  get mode(): QlooMode { return this.d.mode; }
+  get mode(): QlooMode { return "live"; }
 
   private async ledger(row: { endpoint: string; key: string; cached: boolean; status: "ok" | "error" | "blocked"; ms: number; note?: string }) {
     if (!this.d.store) return;
     await this.d.store.appendLedger({
       id: `qloo-${(this.d.now ?? Date.now)().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
       at: new Date((this.d.now ?? Date.now)()).toISOString(), provider: "qloo", endpoint: row.endpoint, requestKey: row.key, cached: row.cached,
-      mode: this.d.mode, status: row.status, ms: row.ms, costUsd: null, planId: this.d.context?.planId ?? null, runId: this.d.context?.runId ?? null, note: row.note ?? null,
+      mode: "live", status: row.status, ms: row.ms, costUsd: null, planId: this.d.context?.planId ?? null, runId: this.d.context?.runId ?? null, note: row.note ?? null,
     }).catch(() => undefined); // a ledger failure never fails a taste lookup
   }
 
@@ -76,31 +70,22 @@ export class QlooClient {
     const now = this.d.now ?? Date.now;
     const t0 = now();
     const key = await requestKey(endpoint, params);
-    const done = (data: T, s: Omit<QlooSource, "key" | "ms">): QlooResult<T> => ({ data, source: { ...s, key, ms: now() - t0 } });
+    const done = (data: T, s: Pick<QlooSource, "cached" | "requestId">): QlooResult<T> => ({ data, source: { mode: "live", ...s, key, ms: now() - t0 } });
     const parse = (raw: unknown): T => {
       const r = schema.safeParse(raw);
       if (!r.success) throw new QlooError(`Qloo ${endpoint} answered in an unexpected shape.`, "shape");
       return r.data;
     };
 
-    if (this.d.mode === "replay") {
-      const hit = await this.d.replay?.lookup(key, kind);
-      if (!hit?.exact) this.d.onMiss?.({ kind, endpoint, params });
-      if (!hit) {
-        await this.ledger({ endpoint, key, cached: true, status: "error", ms: now() - t0, note: "no recording" });
-        throw new QlooError(`No recorded Qloo answer for ${kind}.`, "no_recording");
-      }
-      const data = parse(hit.recording.response);
-      await this.ledger({ endpoint, key, cached: true, status: "ok", ms: now() - t0, note: hit.exact ? "recording" : "default recording for kind" });
-      return done(data, { mode: "replay", cached: true, recorded: true, exact: hit.exact, synthetic: hit.recording.synthetic === true });
-    }
-
     if (!this.d.apiKey) throw new QlooError("Qloo is not configured.", "no_key");
     const cached = await this.d.kv?.get(key);
     if (cached) {
-      const data = parse(JSON.parse(cached));
-      await this.ledger({ endpoint, key, cached: true, status: "ok", ms: now() - t0, note: "kv cache" });
-      return done(data, { mode: "live", cached: true, recorded: false, exact: true, synthetic: false });
+      let data: T | null = null;
+      try { data = parse(JSON.parse(cached)); } catch { /* an unreadable copy is ignored and the call goes live */ }
+      if (data !== null) {
+        await this.ledger({ endpoint, key, cached: true, status: "ok", ms: now() - t0, note: "kv cache" });
+        return done(data, { cached: true, requestId: null });
+      }
     }
     const gate = await this.reserve();
     if (!gate.ok) {
@@ -110,7 +95,7 @@ export class QlooClient {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
     let res: Response;
     try {
-      res = await (this.d.fetchImpl ?? fetch)(`${this.d.base ?? QLOO_BASE}${endpoint}?${qs}`, { headers: { "X-Api-Key": this.d.apiKey, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+      res = await (this.d.fetchImpl ?? fetch)(`${this.d.base ?? QLOO_BASE}${endpoint}?${qs}`, { headers: { "X-Api-Key": this.d.apiKey, accept: "application/json" }, signal: AbortSignal.timeout(25_000) });
     } catch {
       await this.refund(); // the request never produced an answer
       await this.ledger({ endpoint, key, cached: false, status: "error", ms: now() - t0, note: "network" });
@@ -127,6 +112,6 @@ export class QlooClient {
     const data = parse(raw);
     await this.d.kv?.put(key, JSON.stringify(raw), { expirationTtl: CACHE_TTL_S }).catch(() => undefined);
     await this.ledger({ endpoint, key, cached: false, status: "ok", ms: now() - t0 });
-    return done(data, { mode: "live", cached: false, recorded: false, exact: true, synthetic: false });
+    return done(data, { cached: false, requestId: res.headers.get("x-qloo-request-id") });
   }
 }

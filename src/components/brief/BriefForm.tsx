@@ -1,50 +1,81 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CreateBriefRequest } from "@/contract";
 import { Button } from "@/components/ui/Button";
+import { DateRangePicker } from "@/components/ui/DateRangePicker";
+import { Field, Input, Textarea } from "@/components/ui/Field";
+import { ToggleGroup } from "@/components/ui/ToggleGroup";
+import { Alert, Shield, Sparkle } from "@/components/ui/icons";
 import { api } from "@/lib/api-client";
+import { BriefAside } from "./BriefAside";
 import { GuardNotice } from "./GuardNotice";
 import { LovesInput } from "./LovesInput";
-import { guardProbe, presets } from "./presets";
+import { briefGaps, guardProbe, nextFlightStart, presets, samplePreset } from "./presets";
 import { useLiveGuard } from "./useLiveGuard";
 
-const field = "h-10 rounded border border-rule bg-panel px-3 text-[0.9rem] outline-none focus:border-ink-2";
+const BUDGETS = ["10000", "25000", "40000", "75000"];
+
+function Section({ n, title, hint, children }: { n: string; title: string; hint: string; children: ReactNode }) {
+  return (
+    <section className="grid gap-5 rounded-lg border border-line bg-panel p-5 sm:p-6 md:grid-cols-[180px_minmax(0,1fr)]" aria-labelledby={`brief-${n}`}>
+      <div className="flex flex-col gap-1">
+        <span className="font-mono text-micro text-muted">{n}</span>
+        <h2 id={`brief-${n}`} className="text-h4">
+          {title}
+        </h2>
+        <p className="text-small text-muted">{hint}</p>
+      </div>
+      <div className="flex min-w-0 flex-col gap-4">{children}</div>
+    </section>
+  );
+}
 
 export function BriefForm() {
   const router = useRouter();
-  const first = presets[0];
-  const [brandName, setBrandName] = useState(first.brandName);
-  const [loves, setLoves] = useState<string[]>(first.loves);
-  const [audienceText, setAudienceText] = useState(first.audienceText);
-  const [budget, setBudget] = useState("40000");
-  const [flightStart, setFlightStart] = useState("2026-11-16");
-  const [weeks, setWeeks] = useState("4");
-  const [brandVoice, setBrandVoice] = useState(first.brandVoice);
+  const [preset, setPreset] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState("");
+  const [loves, setLoves] = useState<string[]>([]);
+  const [audienceText, setAudienceText] = useState("");
+  const [budget, setBudget] = useState("");
+  const [flightStart, setFlightStart] = useState(() => nextFlightStart());
+  const [weeks, setWeeks] = useState(4);
+  const [brandVoice, setBrandVoice] = useState("");
   const [busy, setBusy] = useState<null | "brief" | "plan">(null);
   const [error, setError] = useState<string | null>(null);
   const guard = useLiveGuard([audienceText, ...loves].join(". "), loves);
   const blocked = guard.phase === "done" && guard.verdict.status === "blocked";
+  const budgetN = Number(budget.replace(/[^\d]/g, "")) || 0;
 
   function applyPreset(id: string) {
-    const p = presets.find((x) => x.id === id);
+    const p = [samplePreset, ...presets].find((x) => x.id === id);
     if (!p) return;
+    setPreset(id);
+    setError(null);
     setBrandName(p.brandName);
     setLoves(p.loves);
     setAudienceText(p.audienceText);
     setBrandVoice(p.brandVoice);
+    if (p.budgetUsd) setBudget(String(p.budgetUsd));
+    if (p.flightStart) setFlightStart(p.flightStart);
+    if (p.flightWeeks) setWeeks(p.flightWeeks);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const gaps = briefGaps({ brandName, loves, audienceText, budgetUsd: budgetN });
+    if (gaps.length) {
+      setError(gaps.join(" "));
+      return;
+    }
     const input = CreateBriefRequest.safeParse({
       brandName: brandName.trim(),
       audienceText: audienceText.trim(),
       loves,
-      budgetUsd: Number(budget),
+      budgetUsd: budgetN,
       flightStart,
-      flightWeeks: Number(weeks),
+      flightWeeks: weeks,
       brandVoice: brandVoice.trim() || null,
     });
     if (!input.success) {
@@ -68,59 +99,109 @@ export function BriefForm() {
     }
   }
 
+  const chip = (on: boolean) =>
+    `inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-small transition-colors ${on ? "border-ink bg-ink text-paper" : "border-line bg-surface text-ink hover:border-ink"}`;
   return (
-    <form data-testid="brief-form" onSubmit={submit} className="flex flex-col gap-5" noValidate>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[0.8rem] text-muted">Start from</span>
-        {presets.map((p) => (
-          <Button key={p.id} size="sm" data-testid={`preset-${p.id}`} onClick={() => applyPreset(p.id)}>
-            {p.label}
-          </Button>
-        ))}
-        <Button size="sm" variant="quiet" data-testid="preset-guard-probe" onClick={() => setAudienceText(guardProbe)} title="See how the guard handles identity targeting">
-          Test the guard: &ldquo;{guardProbe}&rdquo;
-        </Button>
+    <form data-testid="brief-form" onSubmit={submit} noValidate className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Start from a preset">
+          <button
+            type="button"
+            data-testid="preset-sample"
+            aria-pressed={preset === samplePreset.id}
+            onClick={() => applyPreset(samplePreset.id)}
+            className={`inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-small transition-colors ${preset === samplePreset.id ? "border-park bg-park-soft text-park-deep" : "border-ink bg-ink text-paper hover:bg-ink-2"}`}
+          >
+            <Sparkle size={14} /> {samplePreset.label}
+          </button>
+          <span className="mx-1 text-small text-muted">or start from</span>
+          {presets.map((p) => (
+            <button key={p.id} type="button" data-testid={`preset-${p.id}`} aria-pressed={preset === p.id} onClick={() => applyPreset(p.id)} className={chip(preset === p.id)}>
+              <Sparkle size={14} /> {p.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            data-testid="preset-guard-probe"
+            onClick={() => {
+              setPreset(null);
+              setAudienceText(guardProbe);
+            }}
+            title="See how the guard handles identity targeting"
+            className="inline-flex h-9 items-center gap-2 rounded-full border border-dashed border-poster/60 bg-poster-soft px-3.5 text-small text-poster-deep transition-colors hover:border-poster"
+          >
+            <Shield size={14} /> Test the guard
+          </button>
+        </div>
+
+        <Section n="01" title="Brand" hint="Who the boards are for, and how they should sound.">
+          <Field label="Brand name" htmlFor="brief-brand">
+            <Input id="brief-brand" data-testid="brief-brand" value={brandName} placeholder="Porchlight Comedy Tour" onChange={(e) => {
+                setBrandName(e.target.value);
+                setPreset(null);
+              }} required />
+          </Field>
+          <Field label="Brand voice (optional)" htmlFor="brief-voice" hint="Lightning writes every line in this voice.">
+            <Input id="brief-voice" data-testid="brief-voice" value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} placeholder="warm, dry, a little cheeky" />
+          </Field>
+        </Section>
+
+        <Section n="02" title="Audience" hint="Describe what the fans love. Wallspace finds the blocks where those tastes over-index.">
+          <LovesInput value={loves} onChange={(v) => {
+              setLoves(v);
+              setPreset(null);
+            }} />
+          <Field label="Audience, in your words" htmlFor="brief-audience">
+            <Textarea id="brief-audience" data-testid="brief-audience" value={audienceText} placeholder="people who would go to a comedy club on a Tuesday night" onChange={(e) => setAudienceText(e.target.value)} rows={3} maxLength={2000} className="min-h-0" />
+          </Field>
+          <GuardNotice state={guard} onUseSuggestion={(s) => setAudienceText(s)} />
+        </Section>
+
+        <Section n="03" title="Budget and flight" hint="Spend is split so no neighbourhood takes more than 30%.">
+          <Field label="Budget (USD)" htmlFor="brief-budget">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <span className="relative sm:w-48">
+                <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">$</span>
+                <Input id="brief-budget" data-testid="brief-budget" inputMode="numeric" value={budgetN ? budgetN.toLocaleString("en-US") : ""} onChange={(e) => setBudget(e.target.value)} className="pl-7 font-mono tabular-nums" placeholder="40,000" />
+              </span>
+              <ToggleGroup label="Quick budgets" size="sm" testId="brief-budget-quick" value={[String(budgetN)]} onChange={(v) => setBudget(v[0] ?? budget)} items={BUDGETS.map((b) => ({ id: b, label: `$${Number(b) / 1000}k` }))} />
+            </div>
+          </Field>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-small text-ink">Flight dates</span>
+            <div className="sm:max-w-[360px]">
+              <DateRangePicker start={flightStart} weeks={weeks} testId="brief-flight-start" weeksTestId="brief-weeks" onChange={(s, w) => {
+                  setFlightStart(s);
+                  setWeeks(w);
+                }} />
+            </div>
+            <p className="text-micro text-muted">Pick the first and last day; outdoor books in whole weeks. City: Atlanta, the demo inventory.</p>
+          </div>
+        </Section>
       </div>
-      <label className="flex flex-col gap-1">
-        <span className="text-[0.85rem] font-semibold">Brand</span>
-        <input data-testid="brief-brand" value={brandName} onChange={(e) => setBrandName(e.target.value)} className={field} required />
-      </label>
-      <LovesInput value={loves} onChange={setLoves} />
-      <label className="flex flex-col gap-1">
-        <span className="text-[0.85rem] font-semibold">Audience, in your words</span>
-        <textarea data-testid="brief-audience" value={audienceText} onChange={(e) => setAudienceText(e.target.value)} rows={3} maxLength={2000} className="rounded border border-rule bg-panel px-3 py-2 text-[0.9rem] outline-none focus:border-ink-2" />
-      </label>
-      <GuardNotice state={guard} onUseSuggestion={(s) => setAudienceText(s)} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-[0.85rem] font-semibold">Budget (USD)</span>
-          <input data-testid="brief-budget" type="number" min={1000} step={500} inputMode="numeric" value={budget} onChange={(e) => setBudget(e.target.value)} className={field} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[0.85rem] font-semibold">Flight starts</span>
-          <input data-testid="brief-flight-start" type="date" value={flightStart} onChange={(e) => setFlightStart(e.target.value)} className={field} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-[0.85rem] font-semibold">Weeks</span>
-          <input data-testid="brief-weeks" type="number" min={1} max={52} value={weeks} onChange={(e) => setWeeks(e.target.value)} className={field} />
-        </label>
-      </div>
-      <p className="text-[0.8rem] text-muted">City: Atlanta (the demo inventory).</p>
-      <label className="flex flex-col gap-1">
-        <span className="text-[0.85rem] font-semibold">Brand voice (optional)</span>
-        <input data-testid="brief-voice" value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} className={field} />
-      </label>
-      {error ? (
-        <p role="alert" data-testid="brief-error" className="text-[0.85rem] text-guard">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" variant="picked" size="lg" data-testid="brief-submit" disabled={busy !== null || blocked}>
-          {busy === "brief" ? "Saving brief…" : busy === "plan" ? "Starting the run…" : "Start the plan"}
-        </Button>
-        {blocked ? <span className="text-[0.8rem] text-guard">Rephrase as tastes to continue.</span> : null}
-      </div>
+
+      <BriefAside
+        brand={brandName}
+        loves={loves}
+        budget={budgetN}
+        start={flightStart}
+        weeks={weeks}
+        footer={
+          <div className="flex flex-col gap-2.5">
+            {error ? (
+              <p role="alert" data-testid="brief-error" className="flex items-start gap-2 rounded-md border border-poster/40 bg-poster-soft p-3 text-small text-poster-deep">
+                <Alert size={16} className="mt-0.5 shrink-0" /> {error}
+              </p>
+            ) : null}
+            <Button type="submit" variant="primary" size="lg" arrow data-testid="brief-submit" disabled={busy !== null || blocked} className="w-full">
+              {busy === "brief" ? "Saving brief…" : busy === "plan" ? "Starting the run…" : "Start the plan"}
+            </Button>
+            <p className="text-center text-micro text-muted" data-testid="brief-submit-note">
+              {blocked ? "Rephrase the audience as tastes to continue." : "You can watch every step live."}
+            </p>
+          </div>
+        }
+      />
     </form>
   );
 }

@@ -2,17 +2,17 @@
 // app's own API (or the labelled mock data in mock mode); nothing is typed in by hand.
 import type { PlanData, RunData } from "@/lib/api-client";
 
-export type Lift = { tag: string; lift: string | null; synthetic: boolean };
+export type Lift = { tag: string; lift: string | null };
 
-const LIFT = /over-indexes on (.+?) \((?:([\d.]+x) vs Atlanta|(synthetic sample))\)/i;
+const LIFT = /over-indexes on (.+?) \(([\d.]+x) vs Atlanta\)/i;
 const PLAIN = /over-indexes on (.+)$/i;
 
-/** "over-indexes on Lively (4x vs Atlanta)" -> { tag: "Lively", lift: "4x" }; synthetic tags are flagged. */
+/** "over-indexes on Lively (4x vs Atlanta)" -> { tag: "Lively", lift: "4x" }; */
 export function parseLift(label: string): Lift | null {
   const m = LIFT.exec(label);
-  if (m) return { tag: m[1], lift: m[2] ?? null, synthetic: Boolean(m[3]) };
+  if (m) return { tag: m[1], lift: m[2] ?? null };
   const p = PLAIN.exec(label);
-  return p ? { tag: p[1], lift: null, synthetic: false } : null;
+  return p ? { tag: p[1], lift: null } : null;
 }
 
 export interface PickRow {
@@ -51,7 +51,7 @@ export function pickRows(d: PlanData): PickRow[] {
         costUsd: p.costUsd,
         weeklyUsd: Math.round(p.costUsd / weeks),
         affinity: p.affinity,
-        lifts: lifts.length ? lifts : p.topTags.map((t) => ({ tag: t, lift: null, synthetic: false })),
+        lifts: lifts.length ? lifts : p.topTags.map((t) => ({ tag: t, lift: null })),
         line: chosen?.text ?? "",
         lines: p.copy.map((c) => ({ text: c.text, guard: c.guard.status, nemo: c.nemo?.status ?? null })),
         guard: chosen?.guard.status ?? "pass",

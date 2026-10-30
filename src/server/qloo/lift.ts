@@ -42,8 +42,7 @@ export function liftAgainstCity(block: QlooTag[], city: QlooTag[]): LiftedTag[] 
 }
 
 /**
- * The rows a card or a plan shows for one block. With a city list: ranked by lift. Without one (not recorded, or the block's own answer
- * is a synthetic fixture whose rows mean nothing against real Atlanta rows): Qloo's order, no lift.
+ * The rows a card or a plan shows for one block. With a city list: ranked by lift. Without one (the baseline call failed): Qloo's order, no lift.
  */
 export function rankTags(block: QlooTag[], city: QlooTag[] | null, take = 12): LiftedTag[] {
   if (city) return liftAgainstCity(block, city).slice(0, take);

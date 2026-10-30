@@ -20,16 +20,16 @@ Never use nvidia/nemotron-3-super-120b-a12b or NVIDIA-Nemotron-3-Nano-30B-A3B (r
 retry once. Log every call as a RunStep (model, tokens, ms, cost, request id).
 
 ## Provider modes (env)
-QLOO_MODE replay|live (replay = recorded responses in fixtures/qloo, built from the shared probe; live = KV-cached, hard cap),
+QLOO_MODE live (the only mode: KV-cached, hard cap),
 TF_MODE replay|live, TAVILY_MODE replay|live, DATA_MODE mock|app (UI reads src/mocks in mock mode).
 
-## Qloo credits (rule, 30 Oct)
-Credits are unknown and shared with another project on the same key. No live Qloo call while building. Shapes come from the shared probe at
-`../qloo-probe/SHAPES.md` outside this repo (private; raw responses never in this repo).
-Wallspace may make at most 25 extra probe calls, only for shapes the probe lacks, each appended to qloo-probe/ledger.jsonl with
-product "wallspace", and only by the owner session or lane B1 after the owner says go. Live Qloo only for 1-2 end-to-end tests and
-the demo recording. The app enforces a hard Qloo call cap (Durable Object counter) and caches every response in KV.
-Qloo base https://hackathon.api.qloo.com, header X-Api-Key, server-side only.
+## Qloo (decision 30 Oct 23:02 MYT: live only)
+Every Qloo result the app shows is a live call to https://hackathon.api.qloo.com (header X-Api-Key, server-side only, Worker secret
+QLOO_API_KEY) or a KV copy of one (14 days, key qloo:v1:<hash of the request>). There is no replay mode, no recording and no synthetic
+fallback: if Qloo fails the API answers `{ error, code: "qloo_unavailable" }` (503) or `qloo_cap` (429) and the UI shows the error with a
+retry. QLOO_METER caps live calls at 6,000 total and 1,500 a day (the key's 50,000-a-month pool is shared with one other project).
+Raw Qloo bodies never enter this repo: the live cache for scripts is .data/qloo-live-cache (gitignored); tests use invented values.
+scripts/sample-plan.sh builds the sample plan live; scripts/qloo-cache-push.sh copies that cache into production KV.
 
 ## Tavily (shared free key, 1,000 credits/month across six products through 15 Dec)
 Cache in KV by neighbourhood+month; never call on page load; cap 3 new searches per session, 10 credits a day, Wallspace total

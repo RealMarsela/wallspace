@@ -177,4 +177,5 @@ function openLive(runId: string, h: LiveHandlers, fetchRun: (id: string) => Prom
   return stop;
 }
 
-export const api: WallspaceApi = process.env.NEXT_PUBLIC_DATA_MODE === "app" ? realApi : mockApi;
+// A production build never reads src/mocks: sample data is for `next dev` and unit tests only.
+export const api: WallspaceApi = process.env.NEXT_PUBLIC_DATA_MODE === "app" || process.env.NODE_ENV === "production" ? realApi : mockApi;

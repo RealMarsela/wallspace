@@ -3,11 +3,10 @@ import { samplePlanResponse, sampleRun } from "@/mocks/plan-sample";
 import { parseLift, photoReads, pickRows, runSummary, signOff } from "./derive";
 
 describe("landing derive", () => {
-  it("parses Qloo lift labels, synthetic tags and plain tags", () => {
-    expect(parseLift("over-indexes on Lively (4x vs Atlanta)")).toEqual({ tag: "Lively", lift: "4x", synthetic: false });
+  it("parses Qloo lift labels and plain tags", () => {
+    expect(parseLift("over-indexes on Lively (4x vs Atlanta)")).toEqual({ tag: "Lively", lift: "4x" });
     expect(parseLift("over-indexes on Southern-Rap (5.1x vs Atlanta)")?.lift).toBe("5.1x");
-    expect(parseLift("over-indexes on Live Comedy (synthetic sample)")).toEqual({ tag: "Live Comedy", lift: null, synthetic: true });
-    expect(parseLift("over-indexes on live comedy")).toEqual({ tag: "live comedy", lift: null, synthetic: false });
+    expect(parseLift("over-indexes on live comedy")).toEqual({ tag: "live comedy", lift: null });
     expect(parseLift("audience affinity in this cell")).toBeNull();
   });
 
